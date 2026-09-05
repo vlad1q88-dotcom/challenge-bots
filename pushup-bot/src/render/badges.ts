@@ -1,5 +1,6 @@
 import { createCanvas, type SKRSContext2D } from '@napi-rs/canvas';
 import { badgeMeta } from '../domain/badges.ts';
+import { ensureFonts, fontOf } from './fonts.ts';
 import type { BadgeCode } from '../types.ts';
 
 export interface BadgePalette {
@@ -131,7 +132,7 @@ export function drawBadge(
   if (meta.streak) {
     const label = String(meta.streak);
     const size = radius * (label.length > 2 ? 0.78 : label.length > 1 ? 0.92 : 1.05);
-    context.font = `bold ${Math.round(size)}px sans-serif`;
+    context.font = fontOf(size, 'bold');
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     context.fillStyle = ink;
@@ -173,6 +174,7 @@ export function renderBadgeCard(view: BadgeCardView): Buffer {
   const header = 168;
   const height = header + rows * cell.height + 96;
 
+  ensureFonts();
   const canvas = createCanvas(width, height);
   const context = canvas.getContext('2d');
   context.fillStyle = BACKGROUND;
@@ -180,12 +182,12 @@ export function renderBadgeCard(view: BadgeCardView): Buffer {
 
   context.textAlign = 'left';
   context.fillStyle = TEXT;
-  context.font = 'bold 40px sans-serif';
+  context.font = fontOf(40, 'bold');
   context.fillText(`Бейджи · ${view.name}`, padding, 66, width - padding * 2);
   context.fillStyle = MUTED;
-  context.font = '23px sans-serif';
+  context.font = fontOf(23);
   context.fillText(`Получено ${view.earnedCount} из ${view.total}`, padding, 104);
-  context.font = '21px sans-serif';
+  context.font = fontOf(21);
   context.fillText(
     `Серия сейчас: ${view.streak} · рекорд: ${view.best}`,
     padding,
@@ -203,16 +205,16 @@ export function renderBadgeCard(view: BadgeCardView): Buffer {
 
     context.textAlign = 'center';
     context.fillStyle = row.earned ? TEXT : DIM;
-    context.font = 'bold 21px sans-serif';
+    context.font = fontOf(21, 'bold');
     context.fillText(meta.short, centerX, top + 138, cell.width - 20);
     context.fillStyle = row.earned ? MUTED : DIM;
-    context.font = '18px sans-serif';
+    context.font = fontOf(18);
     context.fillText(row.note, centerX, top + 166, cell.width - 20);
   });
 
   context.textAlign = 'left';
   context.fillStyle = MUTED;
-  context.font = '18px sans-serif';
+  context.font = fontOf(18);
   context.fillText('Серии считаются по дням, когда был отчёт хотя бы в одном челлендже', padding, height - 34);
   return canvas.toBuffer('image/png');
 }

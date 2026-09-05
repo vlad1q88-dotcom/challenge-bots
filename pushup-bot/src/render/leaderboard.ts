@@ -3,6 +3,7 @@ import { BOARD_COLORS } from '../constants.ts';
 import { pluralRu } from '../domain/plural.ts';
 import type { BadgeCode, ChallengeStatus } from '../types.ts';
 import { drawBadge } from './badges.ts';
+import { ensureFonts, fontOf } from './fonts.ts';
 
 export interface BoardRowView {
   nickname: string;
@@ -42,16 +43,13 @@ const TEXT = '#F2F2F5';
 const MUTED = '#8A8A96';
 const GHOST = '#3E3E49';
 
-const FONT = 'sans-serif';
 const COLUMN_WIDTHS: Record<number, number> = { 1: 170, 2: 150, 3: 126, 4: 110 };
 const COLUMN_WIDTH_DEFAULT = 92;
 const COLUMN_GAP = 26;
 const PADDING = 44;
 const TRACK_HEIGHT = 620;
 
-function font(size: number, weight: 'bold' | 'normal' = 'normal'): string {
-  return `${weight === 'bold' ? 'bold ' : ''}${size}px ${FONT}`;
-}
+const font = fontOf;
 
 function roundedRect(
   context: SKRSContext2D,
@@ -122,6 +120,7 @@ export function renderBoard(view: BoardView): Buffer {
   const footerHeight = (view.status === 'finished' ? 146 : 122) + (hasBadges ? 52 : 0);
   const height = headerHeight + TRACK_HEIGHT + footerHeight + PADDING;
 
+  ensureFonts();
   const canvas = createCanvas(width, height);
   const context = canvas.getContext('2d');
 
