@@ -19,6 +19,7 @@ import { FAILURE_HINTS, readDailyReps } from '../ocr/screenshot.ts';
 import { renderBoard } from '../render/leaderboard.ts';
 import { boardCaption, buildBoardView, escapeHtml } from '../render/view.ts';
 import type { ChallengeService, FinishedChallenge } from '../service.ts';
+import { inviteText } from './invite.ts';
 import type { BadgeCode, Challenge } from '../types.ts';
 import { HELP, RULES } from './texts.ts';
 
@@ -112,7 +113,11 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     const nick = nicknameOf(challenge, viewerId) ?? '—';
     const head = `<b>${escapeHtml(challenge.title)}</b> · <code>${challenge.id}</code> · ${color.name}`;
     if (challenge.status === 'open') {
-      return `${head}\nНабор: ${challenge.participants.length}/${MAX_PARTICIPANTS} · ник ${escapeHtml(nick)}\nЗапуск: /begin ${challenge.id}`;
+      return (
+        `${head}\nНабор: ${challenge.participants.length}/${MAX_PARTICIPANTS} · ник ${escapeHtml(nick)}` +
+        `\nПояс: ${challenge.timezone} · приглашение: /invite ${challenge.id}` +
+        `\nЗапуск: /begin ${challenge.id}`
+      );
     }
     if (challenge.status === 'active') {
       const done = totalReps(challenge, viewerId);
@@ -223,7 +228,68 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
   bot.command(['start', 'help'], async (ctx) => {
     remember(ctx);
     await service.save();
+    // Переход по ссылке-приглашению: t.me/бот?start=join_КОД
+    const payload = (ctx.match ?? '').trim();
+    if (payload.toLowerCase().startsWith('join_')) {
+      await startJoin(ctx, payload.slice(5).toUpperCase());
+      return;
+    }
     await ctx.reply(HELP, { parse_mode: 'HTML' });
+  });
+
+  /** Отдельным сообщением — чтобы переслать друзьям как есть. */
+  async function sendInvite(ctx: Context, challenge: Challenge): Promise<void> {
+    const username = ctx.me.username;
+    await ctx.reply('👇 Перешли это сообщение соперникам:');
+    await ctx.reply(inviteText(challenge, username, service.freeSeats(challenge)), {
+      link_preview_options: { is_disabled: true },
+    });
+  }
+
+  bot.command('invite', async (ctx) => {
+    remember(ctx);
+    const id = userId(ctx);
+    const open = service.challengesOf(id).filter((challenge) => challenge.status === 'open');
+    const resolved = resolveChallenge(ctx, ctx.match ?? '', open);
+    if (resolved.error) {
+      await ctx.reply(resolved.error);
+      return;
+    }
+    if (!resolved.challenge) {
+      await ctx.reply('К какому челленджу приглашение?', { reply_markup: pickKeyboard('inv', open) });
+      return;
+    }
+    await sendInvite(ctx, resolved.challenge);
+  });
+
+  bot.command('tz', async (ctx) => {
+    remember(ctx);
+    const id = userId(ctx);
+    const parts = (ctx.match ?? '').trim().split(/\s+/).filter(Boolean);
+    const open = service.challengesOf(id).filter(
+      (challenge) => challenge.status === 'open' && challenge.ownerId === id,
+    );
+    if (parts.length < 2) {
+      const current = open.map((challenge) => `<code>${challenge.id}</code> — ${challenge.timezone}`);
+      await ctx.reply(
+        (current.length > 0 ? `Часовой пояс челленджей:\n${current.join('\n')}\n\n` : '') +
+          'Сменить: <code>/tz КОД Asia/Almaty</code>\n' +
+          'По этому поясу считается граница дня — до старта его ещё можно поменять.',
+        { parse_mode: 'HTML' },
+      );
+      return;
+    }
+    const changed = service.setTimezone(parts[0]!.toUpperCase(), id, parts[1]!);
+    if (!changed.ok) {
+      await ctx.reply(changed.error);
+      return;
+    }
+    await service.save();
+    await ctx.reply(
+      `Готово: день челленджа «${escapeHtml(changed.value.title)}» теперь считается по ${changed.value.timezone}. ` +
+        `Сейчас там ${service.today(changed.value.timezone).split('-').reverse().join('.')}.`,
+      { parse_mode: 'HTML' },
+    );
   });
 
   bot.command('rules', async (ctx) => {
@@ -577,6 +643,11 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       await runBegin(ctx, data.slice(6));
       return;
     }
+    if (data.startsWith('inv:')) {
+      const challenge = service.challenge(data.slice(4));
+      if (challenge) await sendInvite(ctx, challenge);
+      return;
+    }
     if (data.startsWith('nick:')) {
       sessions.set(id, { kind: 'nick', code: data.slice(5) });
       await ctx.reply('Какой ник ставим? (3–12 символов). Прервать: /cancel');
@@ -705,12 +776,12 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       `Вызов брошен! Борд <b>${escapeHtml(challenge.title)}</b> (${color.name}).\n\n` +
         `Цель: ${challenge.dailyGoal} в день × ${challenge.days} дн. = <b>${target(challenge)}</b>\n` +
         `Код приглашения: <code>${challenge.id}</code>\n` +
-        `Свободных мест: ${service.freeSeats(challenge)} из ${MAX_PARTICIPANTS - 1}\n\n` +
-        'Перешли соперникам:\n' +
-        `«Принимай вызов по отжиманиям: напиши боту /join ${challenge.id}»\n\n` +
+        `Свободных мест: ${service.freeSeats(challenge)} из ${MAX_PARTICIPANTS - 1}\n` +
+        `День считается по ${challenge.timezone} — до старта пояс можно сменить: /tz ${challenge.id} Asia/Almaty\n\n` +
         `Когда все соберутся — запускай: /begin ${challenge.id}`,
       { parse_mode: 'HTML' },
     );
+    await sendInvite(ctx, challenge);
   });
 
   bot.catch((error) => {

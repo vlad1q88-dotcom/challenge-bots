@@ -14,7 +14,7 @@ import {
   startChallenge,
   type Result,
 } from './domain/challenge.ts';
-import { todayKey } from './domain/dates.ts';
+import { isValidTimezone, todayKey } from './domain/dates.ts';
 import { currentStreak } from './domain/streaks.ts';
 import type { Store } from './storage/store.ts';
 import type { BadgeCode, Challenge, Report, UserProfile } from './types.ts';
@@ -203,6 +203,20 @@ export class ChallengeService {
     if (challenge.ownerId === userId) return fail('Инициатор не может выйти — отмени челлендж командой /cancel.');
     if (!isParticipant(challenge, userId)) return fail('Ты не участвуешь в этом челлендже.');
     challenge.participants = challenge.participants.filter((participant) => participant.userId !== userId);
+    return ok(challenge);
+  }
+
+  setTimezone(code: string, userId: number, timezone: string): Result<Challenge> {
+    const challenge = this.challenge(code);
+    if (!challenge) return fail('Челлендж с таким кодом не найден.');
+    if (challenge.ownerId !== userId) return fail('Часовой пояс меняет только инициатор челленджа.');
+    if (challenge.status !== 'open') {
+      return fail('Пояс можно поменять только до старта: после /begin границы дня уже зафиксированы.');
+    }
+    if (!isValidTimezone(timezone)) {
+      return fail('Не знаю такой часовой пояс. Пример: Asia/Almaty, Europe/Moscow, Asia/Tbilisi.');
+    }
+    challenge.timezone = timezone;
     return ok(challenge);
   }
 

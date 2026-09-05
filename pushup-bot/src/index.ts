@@ -38,11 +38,13 @@ wire(bot, service, { ocr });
 const commands = [
   { command: 'new', description: 'бросить вызов' },
   { command: 'join', description: 'принять вызов по коду' },
+  { command: 'invite', description: 'текст вызова для друзей' },
   { command: 'begin', description: 'запустить челлендж' },
   { command: 'board', description: 'показать лидер-борд' },
   { command: 'boards', description: 'мои челленджи' },
   { command: 'badges', description: 'мои бейджи' },
   { command: 'nick', description: 'сменить ник' },
+  { command: 'tz', description: 'часовой пояс челленджа' },
   { command: 'rules', description: 'правила и бейджи' },
   { command: 'help', description: 'помощь' },
   { command: 'cancel', description: 'прервать диалог' },
