@@ -1,7 +1,8 @@
 import { createCanvas, type SKRSContext2D } from '@napi-rs/canvas';
 import { BOARD_COLORS } from '../constants.ts';
 import { pluralRu } from '../domain/plural.ts';
-import type { ChallengeStatus } from '../types.ts';
+import type { BadgeCode, ChallengeStatus } from '../types.ts';
+import { drawBadge } from './badges.ts';
 
 export interface BoardRowView {
   nickname: string;
@@ -10,6 +11,8 @@ export interface BoardRowView {
   streak: number;
   /** Доля от цели челленджа, может быть больше 1 при перевыполнении. */
   percent: number;
+  /** Бейджи участника — рисуются медалями под столбиком. */
+  badges?: BadgeCode[];
   place?: number;
   champion?: boolean;
   completed?: boolean;
@@ -115,7 +118,8 @@ export function renderBoard(view: BoardView): Buffer {
   const plotWidth = count * columnWidth + (count - 1) * COLUMN_GAP;
   const width = Math.max(760, plotWidth + PADDING * 2);
   const headerHeight = 232;
-  const footerHeight = view.status === 'finished' ? 146 : 122;
+  const hasBadges = view.rows.some((row) => (row.badges?.length ?? 0) > 0);
+  const footerHeight = (view.status === 'finished' ? 146 : 122) + (hasBadges ? 52 : 0);
   const height = headerHeight + TRACK_HEIGHT + footerHeight + PADDING;
 
   const canvas = createCanvas(width, height);
@@ -212,6 +216,17 @@ export function renderBoard(view: BoardView): Buffer {
       centerX,
       labelY,
     );
+
+    const medals = row.badges ?? [];
+    if (medals.length > 0) {
+      const radius = 15;
+      const step = radius * 2 + 6;
+      const start = centerX - ((medals.length - 1) * step) / 2;
+      medals.forEach((code, medal) => {
+        drawBadge(context, code, start + medal * step, labelY + 32, radius, true);
+      });
+      labelY += 52;
+    }
 
     if (view.status === 'finished') {
       labelY += 28;

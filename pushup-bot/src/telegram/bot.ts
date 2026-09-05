@@ -1,7 +1,7 @@
 import type { Bot, Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
 import { MAX_ACTIVE_BOARDS, MAX_PARTICIPANTS, BOARD_COLORS } from '../constants.ts';
-import { badgeMeta } from '../domain/badges.ts';
+import { BADGES, badgeMeta } from '../domain/badges.ts';
 import {
   currentDayNumber,
   hasReportOn,
@@ -13,9 +13,11 @@ import {
   validateDays,
 } from '../domain/challenge.ts';
 import { checkNickname } from '../domain/nickname.ts';
+import { bestStreak, currentStreak } from '../domain/streaks.ts';
 import { days as daysRu } from '../domain/plural.ts';
 import { createOcrEngine, type OcrEngine } from '../ocr/engine.ts';
 import { FAILURE_HINTS, readDailyReps } from '../ocr/screenshot.ts';
+import { renderBadgeCard, type BadgeCardRow } from '../render/badges.ts';
 import { renderBoard } from '../render/leaderboard.ts';
 import { boardCaption, buildBoardView, escapeHtml } from '../render/view.ts';
 import type { ChallengeService, FinishedChallenge } from '../service.ts';
@@ -64,7 +66,9 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
 
   async function sendBoardTo(chatId: number, challenge: Challenge, note?: string): Promise<void> {
     const today = service.today(challenge.timezone);
-    const png = renderBoard(buildBoardView(challenge, today));
+    const png = renderBoard(
+      buildBoardView(challenge, today, (id) => service.user(id)?.badges.map((badge) => badge.code) ?? []),
+    );
     const caption = [note, boardCaption(challenge, today)].filter(Boolean).join('\n\n');
     await bot.api.sendPhoto(chatId, new InputFile(png, `board-${challenge.id}.png`), {
       caption: caption.slice(0, 1024),
@@ -522,17 +526,54 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
 
   bot.command('badges', async (ctx) => {
     remember(ctx);
-    const user = service.user(userId(ctx));
-    if (!user || user.badges.length === 0) {
-      await ctx.reply('Бейджей пока нет. Первый — за 3 дня подряд. Полный список: /rules');
-      return;
-    }
-    const lines = user.badges.map((badge) => {
-      const meta = badgeMeta(badge.code);
-      const date = badge.awardedAt.slice(0, 10).split('-').reverse().join('.');
-      return `${meta.icon} <b>${meta.title}</b> — ${date}`;
+    const id = userId(ctx);
+    const user = service.user(id);
+    const reported = service.reportDays(id);
+    const streak = currentStreak(reported, service.today());
+    const record = bestStreak(reported);
+
+    const owned = new Map<string, string>();
+    for (const badge of user?.badges ?? []) owned.set(badge.code, badge.awardedAt);
+
+    const rows: BadgeCardRow[] = BADGES.map((meta) => {
+      const awardedAt = owned.get(meta.code);
+      if (awardedAt) {
+        return { code: meta.code, earned: true, note: awardedAt.slice(0, 10).split('-').reverse().join('.') };
+      }
+      if (meta.streak) {
+        const left = meta.streak - streak;
+        return {
+          code: meta.code,
+          earned: false,
+          note: streak > 0 ? `ещё ${daysRu(left)}` : `серия ${daysRu(meta.streak)}`,
+        };
+      }
+      const hints: Record<string, string> = {
+        champion: 'за победу',
+        finisher: 'за выполнение',
+        loser: 'за провал',
+      };
+      return { code: meta.code, earned: false, note: hints[meta.code] ?? 'не получен' };
     });
-    await ctx.reply(`<b>Твои бейджи (${user.badges.length})</b>\n${lines.join('\n')}`, { parse_mode: 'HTML' });
+
+    const png = renderBadgeCard({
+      name: user?.displayName ?? 'ты',
+      earnedCount: owned.size,
+      total: rows.length,
+      streak,
+      best: record,
+      rows,
+    });
+    const earnedNames = rows
+      .filter((row) => row.earned)
+      .map((row) => `${badgeMeta(row.code).icon} ${badgeMeta(row.code).title}`);
+    await ctx.replyWithPhoto(new InputFile(png, 'badges.png'), {
+      caption:
+        owned.size === 0
+          ? 'Бейджей пока нет. Первый — за 3 дня подряд.'
+          : `<b>Твои бейджи (${owned.size})</b>\n${earnedNames.join('\n')}`,
+      parse_mode: 'HTML',
+    });
   });
 
   // --- отчёты -----------------------------------------------------------

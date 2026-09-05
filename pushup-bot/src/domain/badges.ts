@@ -7,8 +7,12 @@ export const STREAK_THRESHOLDS = [3, 7, 10, 14, 21, 30, 60, 100, 150, 200, 365] 
 export interface BadgeMeta {
   code: BadgeCode;
   icon: string;
+  /** Короткое имя для картинки: «Разогрев», «Чемпион». */
+  short: string;
   title: string;
   description: string;
+  /** Порог серии, если бейдж за дни подряд. */
+  streak?: number;
 }
 
 const STREAK_TITLES: Record<number, string> = {
@@ -47,18 +51,26 @@ export const BADGES: BadgeMeta[] = [
   ...STREAK_THRESHOLDS.map((threshold) => ({
     code: streakBadgeCode(threshold),
     icon: STREAK_ICONS[threshold] ?? '🔥',
+    short: STREAK_TITLES[threshold] ?? String(threshold),
     title: `${STREAK_TITLES[threshold] ?? threshold} · ${threshold} дн. подряд`,
     description: `${threshold} ${pluralRu(threshold, 'день', 'дня', 'дней')} подряд без пропусков`,
+    streak: threshold,
   })),
-  { code: 'champion', icon: '🏆', title: 'Чемпион', description: 'Победа в челлендже среди перевыполнивших план' },
-  { code: 'finisher', icon: '🎖', title: 'Финишер', description: 'Челлендж выполнен полностью' },
-  { code: 'loser', icon: '💀', title: 'Лузер', description: 'Челлендж провален' },
+  {
+    code: 'champion', icon: '🏆', short: 'Чемпион', title: 'Чемпион',
+    description: 'Победа в челлендже среди перевыполнивших план',
+  },
+  {
+    code: 'finisher', icon: '🎖', short: 'Финишер', title: 'Финишер',
+    description: 'Челлендж выполнен полностью',
+  },
+  { code: 'loser', icon: '💀', short: 'Лузер', title: 'Лузер', description: 'Челлендж провален' },
 ];
 
 const BY_CODE = new Map(BADGES.map((badge) => [badge.code, badge]));
 
 export function badgeMeta(code: BadgeCode): BadgeMeta {
-  return BY_CODE.get(code) ?? { code, icon: '•', title: code, description: '' };
+  return BY_CODE.get(code) ?? { code, icon: '•', short: code, title: code, description: '' };
 }
 
 /** Бейджи за серии, которые заслужены серией такой длины. */
