@@ -45,7 +45,7 @@ npm start
 | Переменная | По умолчанию | Зачем |
 | --- | --- | --- |
 | `BOT_TOKEN` | — | токен от [@BotFather](https://t.me/BotFather) |
-| `CHALLENGE_TIMEZONE` | `Europe/Moscow` | по какому поясу считается «день» челленджа |
+| `CHALLENGE_TIMEZONE` | `Asia/Almaty` | по какому поясу считается «день» челленджа |
 | `DATA_FILE` | `pushup-bot/data/db.json` | файл с данными |
 
 ## Команды

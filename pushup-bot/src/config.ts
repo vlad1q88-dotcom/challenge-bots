@@ -12,7 +12,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (!token) {
     throw new Error('Не задан BOT_TOKEN. Скопируй .env.example в .env и вставь токен от @BotFather.');
   }
-  const timezone = env.CHALLENGE_TIMEZONE?.trim() || 'Europe/Moscow';
+  const timezone = env.CHALLENGE_TIMEZONE?.trim() || 'Asia/Almaty';
   if (!isValidTimezone(timezone)) {
     throw new Error(`Неизвестный часовой пояс CHALLENGE_TIMEZONE: ${timezone}`);
   }

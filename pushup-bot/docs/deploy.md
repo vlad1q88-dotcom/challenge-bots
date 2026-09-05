@@ -59,7 +59,7 @@ notepad .env
 
 ```env
 BOT_TOKEN=8123456789:AAH...      # токен от BotFather
-CHALLENGE_TIMEZONE=Europe/Moscow # по этому поясу считается «день» челленджа
+CHALLENGE_TIMEZONE=Asia/Almaty # пояс, по которому считается «день» челленджа
 DATA_FILE=./data/db.json         # файл с данными, создастся сам
 ```
 
@@ -72,7 +72,7 @@ npm start
 В консоли должно появиться:
 
 ```
-✅ Бот @pushup_leaderboard_bot запущен. Часовой пояс челленджей: Europe/Moscow.
+✅ Бот @pushup_leaderboard_bot запущен. Часовой пояс челленджей: Asia/Almaty.
 ```
 
 Пока команда работает — бот в сети. Остановить: `Ctrl+C`.
