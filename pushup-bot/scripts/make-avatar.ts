@@ -15,6 +15,90 @@ function base(context: SKRSContext2D): void {
   context.fillRect(0, 0, SIZE, SIZE);
 }
 
+/** Кольцо из трёх дуг — по цвету каждого борда. */
+function ring(context: SKRSContext2D, radius: number, thickness: number): void {
+  context.lineWidth = thickness;
+  context.lineCap = 'round';
+  const gap = 0.16;
+  const arc = (Math.PI * 2) / 3 - gap;
+  BOARD_COLORS.forEach((color, index) => {
+    const start = -Math.PI / 2 + index * ((Math.PI * 2) / 3) + gap / 2;
+    const gradient = context.createLinearGradient(0, 0, SIZE, SIZE);
+    gradient.addColorStop(0, color.light);
+    gradient.addColorStop(1, color.dark);
+    context.strokeStyle = gradient;
+    context.beginPath();
+    context.arc(SIZE / 2, SIZE / 2, radius, start, start + arc);
+    context.stroke();
+  });
+}
+
+/** Силуэт в упоре лёжа: голова, корпус, руки, ноги. */
+function pushupFigure(context: SKRSContext2D, color: string, scale = 1, dx = 0, dy = 0): void {
+  context.save();
+  context.translate(SIZE / 2 + dx, SIZE / 2 + dy);
+  context.scale(scale, scale);
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+
+  const shoulder = { x: -60, y: 0 };
+  const hip = { x: 44, y: -16 };
+  const ankle = { x: 120, y: -4 };
+  const ground = 62;
+
+  // Дальняя рука и нога — тусклее, чтобы читался объём.
+  context.globalAlpha = 0.45;
+  context.lineWidth = 22;
+  context.beginPath();
+  context.moveTo(shoulder.x + 16, shoulder.y + 2);
+  context.lineTo(shoulder.x + 30, ground - 6);
+  context.stroke();
+  context.beginPath();
+  context.moveTo(hip.x, hip.y + 4);
+  context.lineTo(ankle.x - 6, ankle.y + 16);
+  context.stroke();
+  context.globalAlpha = 1;
+
+  // Корпус.
+  context.lineWidth = 40;
+  context.beginPath();
+  context.moveTo(shoulder.x, shoulder.y);
+  context.lineTo(hip.x, hip.y);
+  context.stroke();
+
+  // Ближняя нога и стопа.
+  context.lineWidth = 28;
+  context.beginPath();
+  context.moveTo(hip.x - 4, hip.y);
+  context.lineTo(ankle.x, ankle.y);
+  context.stroke();
+  context.lineWidth = 20;
+  context.beginPath();
+  context.moveTo(ankle.x, ankle.y);
+  context.lineTo(ankle.x + 12, ground - 4);
+  context.stroke();
+
+  // Ближняя рука с кистью на полу.
+  context.lineWidth = 26;
+  context.beginPath();
+  context.moveTo(shoulder.x + 2, shoulder.y + 4);
+  context.lineTo(shoulder.x + 12, ground - 8);
+  context.stroke();
+  context.lineWidth = 18;
+  context.beginPath();
+  context.moveTo(shoulder.x + 12, ground - 8);
+  context.lineTo(shoulder.x + 34, ground - 6);
+  context.stroke();
+
+  // Голова.
+  context.beginPath();
+  context.arc(shoulder.x - 36, shoulder.y - 18, 28, 0, Math.PI * 2);
+  context.fill();
+  context.restore();
+}
+
 function bar(context: SKRSContext2D, x: number, width: number, height: number, colorIndex: number): void {
   const bottom = SIZE - 138;
   const top = bottom - height;
@@ -113,4 +197,14 @@ function bar(context: SKRSContext2D, x: number, width: number, height: number, c
   context.fillText('7', cx, cy + 2);
   writeFileSync(`${OUT}avatar-c.png`, canvas.toBuffer('image/png'));
 }
+// Вариант Г: фигура в кольце из трёх цветов.
+{
+  const canvas = createCanvas(SIZE, SIZE);
+  const context = canvas.getContext('2d');
+  base(context);
+  ring(context, SIZE / 2 - 46, 26);
+  pushupFigure(context, '#F2F2F5', 1.16, -4, 6);
+  writeFileSync(`${OUT}avatar-d.png`, canvas.toBuffer('image/png'));
+}
+
 console.log('ok');
