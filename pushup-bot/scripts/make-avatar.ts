@@ -34,7 +34,7 @@ function ring(context: SKRSContext2D, radius: number, thickness: number): void {
 }
 
 /** Силуэт в упоре лёжа: голова, корпус, руки, ноги. */
-function pushupFigure(context: SKRSContext2D, color: string, scale = 1, dx = 0, dy = 0): void {
+function pushupFigure(context: SKRSContext2D, color: string, scale = 1, dx = 0, dy = 0, flat = false): void {
   context.save();
   context.translate(SIZE / 2 + dx, SIZE / 2 + dy);
   context.scale(scale, scale);
@@ -49,7 +49,7 @@ function pushupFigure(context: SKRSContext2D, color: string, scale = 1, dx = 0, 
   const ground = 62;
 
   // Дальняя рука и нога — тусклее, чтобы читался объём.
-  context.globalAlpha = 0.45;
+  context.globalAlpha = flat ? 1 : 0.45;
   context.lineWidth = 22;
   context.beginPath();
   context.moveTo(shoulder.x + 16, shoulder.y + 2);
@@ -238,6 +238,40 @@ function bar(context: SKRSContext2D, x: number, width: number, height: number, c
   pushupFigure(context, '#F7F7FA', 1.4, -6, 14);
   context.restore();
   writeFileSync(`${OUT}avatar-e.png`, canvas.toBuffer('image/png'));
+}
+
+// Вариант Е: та же фигура, белая с чёрным контуром, на фоне столбиков.
+{
+  const canvas = createCanvas(SIZE, SIZE);
+  const context = canvas.getContext('2d');
+  base(context);
+
+  const width = 96;
+  const gap = 22;
+  const startX = (SIZE - (width * 3 + gap * 2)) / 2;
+  const bottom = SIZE - 82;
+  [180, 276, 224].forEach((height, index) => {
+    const color = BOARD_COLORS[index]!;
+    const x = startX + index * (width + gap);
+    const gradient = context.createLinearGradient(0, bottom - height, 0, bottom);
+    gradient.addColorStop(0, color.light);
+    gradient.addColorStop(1, color.dark);
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.roundRect(x, bottom - height, width, height, [width / 2, width / 2, 10, 10]);
+    context.fill();
+  });
+
+  // Контур: силуэт много раз по кругу со сдвигом, поверх — белая фигура.
+  const mask = createCanvas(SIZE, SIZE);
+  pushupFigure(mask.getContext('2d'), '#000000', 1.4, -6, 34, true);
+  const thickness = 11;
+  for (let step = 0; step < 32; step += 1) {
+    const angle = (step / 32) * Math.PI * 2;
+    context.drawImage(mask, Math.cos(angle) * thickness, Math.sin(angle) * thickness);
+  }
+  pushupFigure(context, '#FFFFFF', 1.4, -6, 34);
+  writeFileSync(`${OUT}avatar-f.png`, canvas.toBuffer('image/png'));
 }
 
 console.log('ok');
