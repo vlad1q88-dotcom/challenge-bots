@@ -48,6 +48,15 @@ cp .env.example .env
 nano .env          # или любой редактор
 ```
 
+В Windows (PowerShell):
+
+```powershell
+cp .env.example .env
+notepad .env
+```
+
+> Команды вводи по одной: в PowerShell 5.1 связка `&&` не работает (вместо неё `;`).
+
 ```env
 BOT_TOKEN=8123456789:AAH...      # токен от BotFather
 CHALLENGE_TIMEZONE=Europe/Moscow # по этому поясу считается «день» челленджа
