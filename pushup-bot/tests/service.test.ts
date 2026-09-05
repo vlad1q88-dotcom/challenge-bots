@@ -76,7 +76,7 @@ test('в один день можно отчитаться в каждый че�
   assert.equal(service.submitReport({ code: first.id, userId: 1, reps: 5, photoFileId: 'p' }).ok, false);
 });
 
-test('бейджи за серию выдаются один раз и считаются по всем челленджам', async () => {
+test('серия считается внутри челленджа и не собирается из разных', async () => {
   const clock = new Clock('2026-09-01');
   const service = await makeService(clock);
   service.upsertUser(1, 1, 'Vlad');
@@ -85,26 +85,37 @@ test('бейджи за серию выдаются один раз и счит�
   запустить(service, first, 2);
   запустить(service, second, 3);
 
-  const day1 = service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
-  assert.equal(day1.ok && day1.value.awarded.length, 0);
-
+  // Три дня подряд, но по очереди в разные челленджи — серии не выходит.
+  service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
   clock.set('2026-09-02');
   service.submitReport({ code: second.id, userId: 1, reps: 10, photoFileId: 'p' });
-
   clock.set('2026-09-03');
-  const day3 = service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
-  assert.equal(day3.ok && day3.value.streak, 3);
-  assert.deepEqual(day3.ok && day3.value.awarded, ['streak_3']);
+  const split = service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
+  assert.equal(split.ok && split.value.streak, 1);
+  assert.deepEqual(split.ok && split.value.awarded, []);
 
-  // Тот же бейдж второй раз не выдаётся.
+  // А три дня подряд в одном челлендже — уже серия и бейдж.
   clock.set('2026-09-04');
-  const day4 = service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
-  assert.deepEqual(day4.ok && day4.value.awarded, []);
+  service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
+  clock.set('2026-09-05');
+  const third = service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
+  assert.equal(third.ok && third.value.streak, 3);
+  assert.deepEqual(third.ok && third.value.awarded, ['streak_3']);
+
+  // Тот же бейдж второй раз не выдаётся, даже в другом челлендже.
+  for (const day of ['2026-09-06', '2026-09-07', '2026-09-08']) {
+    clock.set(day);
+    const again = service.submitReport({ code: second.id, userId: 1, reps: 10, photoFileId: 'p' });
+    assert.deepEqual(again.ok && again.value.awarded, []);
+  }
 
   // Пропуск обнуляет серию.
-  clock.set('2026-09-06');
-  const day6 = service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
-  assert.equal(day6.ok && day6.value.streak, 1);
+  clock.set('2026-09-10');
+  const afterGap = service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
+  assert.equal(afterGap.ok && afterGap.value.streak, 1);
+
+  // Сводка для /badges: текущая серия — после пропуска снова 1, рекорд остаётся 3.
+  assert.deepEqual(service.streaks(1), { current: 1, best: 3 });
 });
 
 test('по истечении срока челлендж закрывается и раздаёт итоговые бейджи', async () => {

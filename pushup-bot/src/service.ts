@@ -15,7 +15,7 @@ import {
   type Result,
 } from './domain/challenge.ts';
 import { isValidTimezone, todayKey } from './domain/dates.ts';
-import { currentStreak } from './domain/streaks.ts';
+import { bestStreak, currentStreak } from './domain/streaks.ts';
 import type { Store } from './storage/store.ts';
 import type { BadgeCode, Challenge, Report, UserProfile } from './types.ts';
 
@@ -83,15 +83,26 @@ export class ChallengeService {
     return this.#store.data.users.find((user) => user.userId === userId);
   }
 
-  /** Все дни, за которые человек отчитался хотя бы в одном челлендже. */
-  reportDays(userId: number): string[] {
-    const days = new Set<string>();
-    for (const challenge of this.#store.data.challenges) {
-      for (const report of challenge.reports) {
-        if (report.userId === userId) days.add(report.day);
+  /** Дни, за которые человек отчитался в конкретном челлендже. */
+  reportDays(challenge: Challenge, userId: number): string[] {
+    return [...new Set(challenge.reports.filter((report) => report.userId === userId).map((report) => report.day))];
+  }
+
+  /**
+   * Серии считаются внутри челленджа: текущая — лучшая among идущих челленджей,
+   * рекорд — самая длинная серия, собранная в рамках одного челленджа.
+   */
+  streaks(userId: number): { current: number; best: number } {
+    let current = 0;
+    let best = 0;
+    for (const challenge of this.challengesOf(userId)) {
+      const days = this.reportDays(challenge, userId);
+      best = Math.max(best, bestStreak(days));
+      if (challenge.status === 'active') {
+        current = Math.max(current, currentStreak(days, this.today(challenge.timezone)));
       }
     }
-    return [...days];
+    return { current, best };
   }
 
   awardBadges(userId: number, codes: readonly BadgeCode[], challengeId: string | null): BadgeCode[] {
@@ -262,7 +273,7 @@ export class ChallengeService {
     });
     if (!added.ok) return added;
 
-    const streak = currentStreak(this.reportDays(input.userId), day);
+    const streak = currentStreak(this.reportDays(challenge, input.userId), day);
     const awarded = this.awardBadges(input.userId, streakBadgesFor(streak), null);
     return ok({ challenge, report: added.value, awarded, streak });
   }

@@ -215,6 +215,6 @@ export function renderBadgeCard(view: BadgeCardView): Buffer {
   context.textAlign = 'left';
   context.fillStyle = MUTED;
   context.font = fontOf(18);
-  context.fillText('Серии считаются по дням, когда был отчёт хотя бы в одном челлендже', padding, height - 34);
+  context.fillText('Серия считается внутри челленджа: пропуск обнуляет её, новый челлендж начинает заново', padding, height - 34);
   return canvas.toBuffer('image/png');
 }

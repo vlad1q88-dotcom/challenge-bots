@@ -13,7 +13,6 @@ import {
   validateDays,
 } from '../domain/challenge.ts';
 import { checkNickname } from '../domain/nickname.ts';
-import { bestStreak, currentStreak } from '../domain/streaks.ts';
 import { days as daysRu } from '../domain/plural.ts';
 import { createOcrEngine, type OcrEngine } from '../ocr/engine.ts';
 import { FAILURE_HINTS, readDailyReps } from '../ocr/screenshot.ts';
@@ -528,9 +527,7 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     remember(ctx);
     const id = userId(ctx);
     const user = service.user(id);
-    const reported = service.reportDays(id);
-    const streak = currentStreak(reported, service.today());
-    const record = bestStreak(reported);
+    const { current: streak, best: record } = service.streaks(id);
 
     const owned = new Map<string, string>();
     for (const badge of user?.badges ?? []) owned.set(badge.code, badge.awardedAt);
