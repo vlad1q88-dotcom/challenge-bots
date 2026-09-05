@@ -49,6 +49,45 @@ function morph(data: Uint8Array, width: number, height: number, keep: number): U
   return out;
 }
 
+/** Размытие альфы по строкам и столбцам: несколько проходов ≈ гауссово. */
+function blurAlpha(data: Uint8ClampedArray, width: number, height: number, radius: number, passes = 3): void {
+  const line = new Float32Array(Math.max(width, height));
+  for (let pass = 0; pass < passes; pass += 1) {
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) line[x] = data[(y * width + x) * 4 + 3]!;
+      let sum = 0;
+      for (let x = -radius; x <= radius; x += 1) sum += line[Math.min(Math.max(x, 0), width - 1)]!;
+      for (let x = 0; x < width; x += 1) {
+        data[(y * width + x) * 4 + 3] = sum / (radius * 2 + 1);
+        sum -= line[Math.min(Math.max(x - radius, 0), width - 1)]!;
+        sum += line[Math.min(Math.max(x + radius + 1, 0), width - 1)]!;
+      }
+    }
+    for (let x = 0; x < width; x += 1) {
+      for (let y = 0; y < height; y += 1) line[y] = data[(y * width + x) * 4 + 3]!;
+      let sum = 0;
+      for (let y = -radius; y <= radius; y += 1) sum += line[Math.min(Math.max(y, 0), height - 1)]!;
+      for (let y = 0; y < height; y += 1) {
+        data[(y * width + x) * 4 + 3] = sum / (radius * 2 + 1);
+        sum -= line[Math.min(Math.max(y - radius, 0), height - 1)]!;
+        sum += line[Math.min(Math.max(y + radius + 1, 0), height - 1)]!;
+      }
+    }
+  }
+}
+
+/** Ступеньки от исходной картинки размываем и режем порогом — край выходит гладким. */
+function smoothEdges(data: Uint8ClampedArray, count: number, softness: number): void {
+  for (let i = 0; i < count; i += 1) {
+    const alpha = data[i * 4 + 3]! / 255;
+    const value = Math.min(Math.max((alpha - 0.5) * softness + 0.5, 0), 1);
+    data[i * 4] = 255;
+    data[i * 4 + 1] = 255;
+    data[i * 4 + 2] = 255;
+    data[i * 4 + 3] = Math.round(value * 255);
+  }
+}
+
 /** Перекрашивает непрозрачные пиксели спрайта в один цвет. */
 function tint(sprite: Canvas, color: string): Canvas {
   const canvas = createCanvas(sprite.width, sprite.height);
@@ -99,26 +138,34 @@ for (let i = 0; i < width * height; i += 1) {
 }
 cutContext.putImageData(image, 0, 0);
 
-// Увеличиваем со сглаживанием, потом режем полупрозрачность — края остаются чёткими.
+// Спрайт собираем вдвое крупнее итогового: размываем ступеньки, режем порогом,
+// обводим контуром и только потом уменьшаем — края получаются плавными и чёткими.
 const cropWidth = maxX - minX + 1;
 const cropHeight = maxY - minY + 1;
 const spriteWidth = 322;
 const spriteHeight = Math.round((cropHeight / cropWidth) * spriteWidth);
-const sprite = createCanvas(spriteWidth, spriteHeight);
-const spriteContext = sprite.getContext('2d');
-spriteContext.imageSmoothingEnabled = true;
-spriteContext.imageSmoothingQuality = 'high';
-spriteContext.drawImage(cut, minX, minY, cropWidth, cropHeight, 0, 0, spriteWidth, spriteHeight);
-const spriteData = spriteContext.getImageData(0, 0, spriteWidth, spriteHeight);
-for (let i = 0; i < spriteWidth * spriteHeight; i += 1) {
-  const alpha = spriteData.data[i * 4 + 3]!;
-  spriteData.data[i * 4] = 255;
-  spriteData.data[i * 4 + 1] = 255;
-  spriteData.data[i * 4 + 2] = 255;
-  // Мягкие края сохраняем, но подтягиваем, чтобы силуэт не выглядел размытым.
-  spriteData.data[i * 4 + 3] = Math.max(0, Math.min(255, Math.round((alpha - 60) * 2.2)));
+const bigWidth = spriteWidth * 2;
+const bigHeight = spriteHeight * 2;
+
+const big = createCanvas(bigWidth, bigHeight);
+const bigContext = big.getContext('2d');
+bigContext.imageSmoothingEnabled = false;
+bigContext.drawImage(cut, minX, minY, cropWidth, cropHeight, 0, 0, bigWidth, bigHeight);
+const bigData = bigContext.getImageData(0, 0, bigWidth, bigHeight);
+blurAlpha(bigData.data, bigWidth, bigHeight, Math.round(bigWidth / cropWidth) + 2);
+smoothEdges(bigData.data, bigWidth * bigHeight, 6);
+bigContext.putImageData(bigData, 0, 0);
+
+// Контур: чёрная копия силуэта, размноженная по кругу.
+const thickness = 20;
+const outlined = createCanvas(bigWidth + thickness * 2, bigHeight + thickness * 2);
+const outlinedContext = outlined.getContext('2d');
+const shadow = tint(big, '#000000');
+for (let step = 0; step < 96; step += 1) {
+  const angle = (step / 96) * Math.PI * 2;
+  outlinedContext.drawImage(shadow, thickness + Math.cos(angle) * thickness, thickness + Math.sin(angle) * thickness);
 }
-spriteContext.putImageData(spriteData, 0, 0);
+outlinedContext.drawImage(big, thickness, thickness);
 
 // Собираем аватарку.
 const canvas = createCanvas(SIZE, SIZE);
@@ -145,15 +192,13 @@ const bottom = SIZE - 72;
   context.fill();
 });
 
-const figureX = (SIZE - spriteWidth) / 2;
-const figureY = (SIZE - spriteHeight) / 2 + 12;
-const outline = tint(sprite, '#000000');
-const thickness = 10;
-for (let step = 0; step < 48; step += 1) {
-  const angle = (step / 48) * Math.PI * 2;
-  context.drawImage(outline, figureX + Math.cos(angle) * thickness, figureY + Math.sin(angle) * thickness);
-}
-context.drawImage(sprite, figureX, figureY);
+const drawWidth = outlined.width / 2;
+const drawHeight = outlined.height / 2;
+const figureX = (SIZE - drawWidth) / 2;
+const figureY = (SIZE - drawHeight) / 2 + 12;
+context.imageSmoothingEnabled = true;
+context.imageSmoothingQuality = 'high';
+context.drawImage(outlined, figureX, figureY, drawWidth, drawHeight);
 
 writeFileSync(target, canvas.toBuffer('image/png'));
 console.log(`готово: ${target} (фигура ${spriteWidth}×${spriteHeight})`);
