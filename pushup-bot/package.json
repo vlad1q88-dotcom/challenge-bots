@@ -1,0 +1,26 @@
+{
+  "name": "pushup-leaderboard-bot",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Telegram-бот с лидер-бордом челленджа по отжиманиям",
+  "scripts": {
+    "start": "node src/index.ts",
+    "dev": "node --watch src/index.ts",
+    "typecheck": "tsc -b",
+    "test": "node --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.86",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "grammy": "^1.40.1",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "typescript": "~6.0.2"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}
