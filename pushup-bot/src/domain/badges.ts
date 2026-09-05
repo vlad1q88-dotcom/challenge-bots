@@ -1,3 +1,4 @@
+import { pluralRu } from './plural.ts';
 import type { AwardedBadge, BadgeCode } from '../types.ts';
 
 /** Пороги бейджей за серии дней подряд. */
@@ -47,7 +48,7 @@ export const BADGES: BadgeMeta[] = [
     code: streakBadgeCode(threshold),
     icon: STREAK_ICONS[threshold] ?? '🔥',
     title: `${STREAK_TITLES[threshold] ?? threshold} · ${threshold} дн. подряд`,
-    description: `${threshold} дней подряд без пропусков`,
+    description: `${threshold} ${pluralRu(threshold, 'день', 'дня', 'дней')} подряд без пропусков`,
   })),
   { code: 'champion', icon: '🏆', title: 'Чемпион', description: 'Победа в челлендже среди перевыполнивших план' },
   { code: 'finisher', icon: '🎖', title: 'Финишер', description: 'Челлендж выполнен полностью' },
