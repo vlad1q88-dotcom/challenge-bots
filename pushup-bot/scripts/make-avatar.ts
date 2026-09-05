@@ -207,4 +207,37 @@ function bar(context: SKRSContext2D, x: number, width: number, height: number, c
   writeFileSync(`${OUT}avatar-d.png`, canvas.toBuffer('image/png'));
 }
 
+// Вариант Д: та же фигура впереди, столбики — фоном.
+{
+  const canvas = createCanvas(SIZE, SIZE);
+  const context = canvas.getContext('2d');
+  base(context);
+
+  const width = 96;
+  const gap = 22;
+  const startX = (SIZE - (width * 3 + gap * 2)) / 2;
+  const bottom = SIZE - 104;
+  context.globalAlpha = 0.92;
+  [180, 276, 224].forEach((height, index) => {
+    const color = BOARD_COLORS[index]!;
+    const x = startX + index * (width + gap);
+    const gradient = context.createLinearGradient(0, bottom - height, 0, bottom);
+    gradient.addColorStop(0, color.light);
+    gradient.addColorStop(1, color.dark);
+    context.fillStyle = gradient;
+    context.beginPath();
+    context.roundRect(x, bottom - height, width, height, [width / 2, width / 2, 10, 10]);
+    context.fill();
+  });
+  context.globalAlpha = 1;
+
+  // Тень, чтобы белый силуэт не сливался с яркими столбиками.
+  context.save();
+  context.shadowColor = 'rgba(0,0,0,0.7)';
+  context.shadowBlur = 38;
+  pushupFigure(context, '#F7F7FA', 1.4, -6, 14);
+  context.restore();
+  writeFileSync(`${OUT}avatar-e.png`, canvas.toBuffer('image/png'));
+}
+
 console.log('ok');
