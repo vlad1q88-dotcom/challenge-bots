@@ -142,7 +142,7 @@ cutContext.putImageData(image, 0, 0);
 // обводим контуром и только потом уменьшаем — края получаются плавными и чёткими.
 const cropWidth = maxX - minX + 1;
 const cropHeight = maxY - minY + 1;
-const spriteWidth = 322;
+const spriteWidth = 290;
 const spriteHeight = Math.round((cropHeight / cropWidth) * spriteWidth);
 const bigWidth = spriteWidth * 2;
 const bigHeight = spriteHeight * 2;
@@ -179,7 +179,7 @@ context.fillRect(0, 0, SIZE, SIZE);
 const barWidth = 96;
 const gap = 22;
 const startX = (SIZE - (barWidth * 3 + gap * 2)) / 2;
-const bottom = SIZE - 72;
+const bottom = SIZE - 92;
 [300, 400, 348].forEach((barHeight, index) => {
   const color = BOARD_COLORS[index]!;
   const x = startX + index * (barWidth + gap);
@@ -195,7 +195,8 @@ const bottom = SIZE - 72;
 const drawWidth = outlined.width / 2;
 const drawHeight = outlined.height / 2;
 const figureX = (SIZE - drawWidth) / 2;
-const figureY = (SIZE - drawHeight) / 2 + 12;
+// Низ фигуры совпадает с низом столбиков — стоят на одной линии.
+const figureY = bottom - drawHeight;
 context.imageSmoothingEnabled = true;
 context.imageSmoothingQuality = 'high';
 context.drawImage(outlined, figureX, figureY, drawWidth, drawHeight);
