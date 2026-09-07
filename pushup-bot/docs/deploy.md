@@ -121,6 +121,48 @@ npm start
 Важно: компьютер всё равно должен быть включён и не спать. Если нужен бот
 круглосуточно, ему место на сервере — следующий раздел.
 
+## 7в. Бот на смартфоне (Android)
+
+Android годится как «сервер»: у библиотеки рисования есть сборка под `android-arm64`,
+распознавание работает на WebAssembly, компилировать ничего не нужно.
+На iPhone это невозможно — iOS не даёт держать фоновый процесс.
+
+1. Поставь **Termux** из [F-Droid](https://f-droid.org/packages/com.termux/) —
+   версия из Play Store устарела и не обновляется.
+2. В Termux:
+
+   ```bash
+   pkg update && pkg install nodejs git
+   node -v                     # нужен 22.18 или новее
+   git clone https://github.com/vlad1q88-dotcom/challenge-bots.git
+   cd challenge-bots/pushup-bot
+   npm ci
+   cp .env.example .env
+   nano .env                   # вставить BOT_TOKEN
+   npm start
+   ```
+
+3. Чтобы Android не усыплял процесс:
+   * в Termux выполни `termux-wake-lock`;
+   * в настройках телефона: Приложения → Termux → Батарея → **Без ограничений**;
+   * держи телефон на зарядке.
+
+4. Автозапуск после перезагрузки — приложение **Termux:Boot** (тоже с F-Droid),
+   и файл `~/.termux/boot/start-bot.sh`:
+
+   ```bash
+   #!/data/data/com.termux/files/usr/bin/sh
+   termux-wake-lock
+   cd ~/challenge-bots/pushup-bot
+   npm start
+   ```
+
+   Не забудь `chmod +x ~/.termux/boot/start-bot.sh`.
+
+Чего ожидать: распознавание скриншота на телефоне занимает 2–4 секунды вместо
+секунды, память под воркер — около 250 МБ. Мобильный интернет подходит: бот сам
+опрашивает Телеграм, входящие соединения ему не нужны, смена IP не мешает.
+
 ## 7б. Держать бота включённым (Linux, systemd)
 
 Чтобы бот не выключался вместе с терминалом и поднимался после перезагрузки:
