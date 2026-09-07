@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCanvas } from '@napi-rs/canvas';
 import { createOcrEngine } from '../src/ocr/engine.ts';
-import { readDailyReps } from '../src/ocr/screenshot.ts';
+import { readWeek } from '../src/ocr/screenshot.ts';
 
 /** Синтетический скриншот приложения: тёмная тема, недельный график со столбиками. */
 function fakeScreenshot(values: readonly number[]): Buffer {
@@ -39,19 +39,20 @@ function fakeScreenshot(values: readonly number[]): Buffer {
   return canvas.toBuffer('image/png');
 }
 
-test('полный проход: картинка → OCR → число за сегодня', { timeout: 60_000 }, async () => {
+test('полный проход: картинка → OCR → значения по дням', { timeout: 60_000 }, async () => {
   const engine = createOcrEngine();
   try {
-    const page = await engine.read(fakeScreenshot([0, 0, 42, 0, 0, 0, 0]));
+    // Пн 0, Вт 25, Ср 42, Чт 0, Пт 18, Сб 0, Вс 0.
+    const page = await engine.read(fakeScreenshot([0, 25, 42, 0, 18, 0, 0]));
+    const result = readWeek(page, '2026-09-05');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
 
-    // 02.09.2026 — среда, столбик 42.
-    const wednesday = readDailyReps(page, '2026-09-02');
-    assert.equal(wednesday.ok, true);
-    assert.equal(wednesday.ok && wednesday.value.reps, 42);
-
-    // 03.09.2026 — четверг, столбика нет: сумму «42 reps total» брать нельзя.
-    const thursday = readDailyReps(page, '2026-09-03');
-    assert.equal(thursday.ok === false && thursday.reason, 'no-bar-label');
+    const byWeekday = new Map(result.value.days.map((day) => [day.label, day.reps]));
+    assert.deepEqual([...byWeekday.entries()].sort(), [['Fri', 18], ['Tue', 25], ['Wed', 42]]);
+    // Пустые дни в отчёт не попадают.
+    assert.equal(byWeekday.has('Mon'), false);
+    assert.equal(byWeekday.has('Sun'), false);
   } finally {
     await engine.close();
   }

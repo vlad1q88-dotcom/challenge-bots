@@ -1,7 +1,7 @@
 import { MAX_ACTIVE_BOARDS, MAX_PARTICIPANTS } from './constants.ts';
 import { newBadges, streakBadgesFor } from './domain/badges.ts';
 import {
-  addReport,
+  syncReports,
   createChallenge,
   fail,
   finalize,
@@ -14,10 +14,11 @@ import {
   startChallenge,
   type Result,
 } from './domain/challenge.ts';
-import { isValidTimezone, todayKey } from './domain/dates.ts';
+import { dateOfWeekday, isValidTimezone, mondayOf, todayKey } from './domain/dates.ts';
 import { bestStreak, currentStreak } from './domain/streaks.ts';
 import type { Store } from './storage/store.ts';
-import type { BadgeCode, Challenge, Report, UserProfile } from './types.ts';
+import type { SyncSummary } from './domain/challenge.ts';
+import type { BadgeCode, Challenge, UserProfile } from './types.ts';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
@@ -26,11 +27,18 @@ export interface FinishedChallenge {
   awards: Map<number, BadgeCode[]>;
 }
 
-export interface ReportOutcome {
+export interface ScreenshotOutcome {
   challenge: Challenge;
-  report: Report;
+  summary: SyncSummary;
   awarded: BadgeCode[];
   streak: number;
+  best: number;
+}
+
+/** Столбик недельного графика: день недели (0 — воскресенье) и его значение. */
+export interface WeekEntry {
+  weekday: number;
+  reps: number;
 }
 
 export interface ServiceOptions {
@@ -250,32 +258,47 @@ export class ChallengeService {
 
   // --- Отчёты -------------------------------------------------------------
 
-  submitReport(input: {
+  /**
+   * Переносит значения со скриншота в челлендж: каждый день недели получает
+   * то количество, которое показывает приложение. Повторная отправка не
+   * удваивает результат — она просто подтверждает или исправляет дни.
+   */
+  submitScreenshot(input: {
     code: string;
     userId: number;
-    reps: number;
+    week: readonly WeekEntry[];
+    /** Первый день периода с заголовка скриншота, если он распознан. */
+    weekStart: string | null;
     photoFileId: string;
     photoUniqueId?: string;
-    source?: 'ocr' | 'manual';
-  }): Result<ReportOutcome> {
+  }): Result<ScreenshotOutcome> {
     const challenge = this.challenge(input.code);
     if (!challenge) return fail('Челлендж с таким кодом не найден.');
-    const day = this.today(challenge.timezone);
-    const added = addReport({
+
+    const today = this.today(challenge.timezone);
+    const monday = mondayOf(input.weekStart ?? today);
+    const entries = input.week.map((day) => ({
+      day: dateOfWeekday(monday, day.weekday),
+      reps: day.reps,
+    }));
+
+    const synced = syncReports({
       challenge,
       userId: input.userId,
-      reps: input.reps,
-      day,
+      entries,
+      today,
       photoFileId: input.photoFileId,
       photoUniqueId: input.photoUniqueId ?? '',
-      source: input.source,
       now: this.#now(),
     });
-    if (!added.ok) return added;
+    if (!synced.ok) return synced;
 
-    const streak = currentStreak(this.reportDays(challenge, input.userId), day);
-    const awarded = this.awardBadges(input.userId, streakBadgesFor(streak), null);
-    return ok({ challenge, report: added.value, awarded, streak });
+    const days = this.reportDays(challenge, input.userId);
+    const streak = currentStreak(days, today);
+    const best = bestStreak(days);
+    // Серия могла закрыться задним числом, поэтому смотрим на лучшую в челлендже.
+    const awarded = this.awardBadges(input.userId, streakBadgesFor(best), null);
+    return ok({ challenge, summary: synced.value, awarded, streak, best });
   }
 
   // --- Финиш --------------------------------------------------------------

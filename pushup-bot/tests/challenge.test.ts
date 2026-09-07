@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  addReport,
+  syncReports,
   createChallenge,
   finalize,
   isOver,
@@ -35,8 +35,25 @@ function join(challenge: Challenge, userId: number, nickname: string): void {
   assert.equal(result.ok, true, result.ok ? '' : result.error);
 }
 
-function report(challenge: Challenge, userId: number, day: string, reps: number) {
-  return addReport({ challenge, userId, reps, day, photoFileId: 'photo', photoUniqueId: `${userId}-${day}`, now: NOW });
+/** Скриншот с одним днём: значение за этот день. */
+function report(challenge: Challenge, userId: number, day: string, reps: number, today = day) {
+  return syncReports({
+    challenge,
+    userId,
+    entries: [{ day, reps }],
+    today,
+    photoFileId: 'photo',
+    photoUniqueId: `${userId}-${day}`,
+    now: NOW,
+  });
+}
+
+/** Скриншот недели: несколько дней сразу. */
+function week(challenge: Challenge, userId: number, entries: { day: string; reps: number }[], today: string) {
+  return syncReports({
+    challenge, userId, entries, today,
+    photoFileId: 'photo', photoUniqueId: `${userId}-week`, now: NOW,
+  });
 }
 
 test('в челлендже не больше 6 участников', () => {
@@ -73,55 +90,83 @@ test('старт задаёт границы челленджа и требуе�
   assert.equal(target(challenge), 500);
 });
 
-test('второй отчёт за тот же день не принимается', () => {
+test('повторный скриншот не удваивает результат, а подтверждает день', () => {
   const challenge = makeChallenge();
   join(challenge, 2, 'Sergey');
   startChallenge(challenge, '2026-09-01');
 
-  assert.equal(report(challenge, 1, '2026-09-01', 50).ok, true);
-  const second = report(challenge, 1, '2026-09-01', 30);
-  assert.equal(second.ok, false);
-  assert.match(second.ok ? '' : second.error, /одного отчёта в день/i);
+  const first = report(challenge, 1, '2026-09-01', 50);
+  assert.equal(first.ok, true);
+  assert.equal(first.ok && first.value.added.length, 1);
+  assert.equal(first.ok && first.value.total, 50);
+
+  // Тот же день с тем же значением — ничего не меняется.
+  const again = report(challenge, 1, '2026-09-01', 50);
+  assert.equal(again.ok && again.value.unchanged.length, 1);
+  assert.equal(again.ok && again.value.total, 50);
   assert.equal(challenge.reports.length, 1);
 
-  // На следующий день — можно снова.
-  assert.equal(report(challenge, 1, '2026-09-02', 70).ok, true);
+  // Днём позже человек дожал ещё — значение дня обновляется, а не прибавляется.
+  const corrected = report(challenge, 1, '2026-09-01', 80);
+  assert.equal(corrected.ok && corrected.value.updated[0]?.was, 50);
+  assert.equal(corrected.ok && corrected.value.total, 80);
+  assert.equal(challenge.reports.length, 1);
 });
 
-test('один и тот же скриншот второй раз не проходит', () => {
+test('скриншот за неделю записывает все дни разом', () => {
+  const challenge = makeChallenge(10, 50);
+  join(challenge, 2, 'Sergey');
+  startChallenge(challenge, '2026-09-01');
+
+  const result = week(challenge, 1, [
+    { day: '2026-09-01', reps: 50 },
+    { day: '2026-09-02', reps: 60 },
+    { day: '2026-09-03', reps: 40 },
+  ], '2026-09-03');
+  assert.equal(result.ok && result.value.added.length, 3);
+  assert.equal(result.ok && result.value.total, 150);
+
+  // Повторная отправка той же недели с одним исправленным днём.
+  const second = week(challenge, 1, [
+    { day: '2026-09-01', reps: 50 },
+    { day: '2026-09-02', reps: 90 },
+    { day: '2026-09-03', reps: 40 },
+  ], '2026-09-03');
+  assert.equal(second.ok && second.value.unchanged.length, 2);
+  assert.equal(second.ok && second.value.updated.length, 1);
+  assert.equal(second.ok && second.value.total, 180);
+  assert.equal(challenge.reports.length, 3);
+});
+
+test('дни вне челленджа и будущие дни не засчитываются', () => {
+  const challenge = makeChallenge(3, 50); // 01–03 сентября
+  join(challenge, 2, 'Sergey');
+  startChallenge(challenge, '2026-09-01');
+
+  const result = week(challenge, 1, [
+    { day: '2026-08-31', reps: 100 }, // до старта
+    { day: '2026-09-02', reps: 60 },  // в срок
+    { day: '2026-09-04', reps: 70 },  // после финиша
+    { day: '2026-09-03', reps: 80 },  // ещё не наступил
+  ], '2026-09-02');
+
+  assert.equal(result.ok, true);
+  assert.equal(result.ok && result.value.added.length, 1);
+  assert.equal(result.ok && result.value.skipped, 3);
+  assert.equal(result.ok && result.value.total, 60);
+});
+
+test('чужой скриншот и пустые значения не проходят', () => {
   const challenge = makeChallenge();
   join(challenge, 2, 'Sergey');
   startChallenge(challenge, '2026-09-01');
 
-  const first = addReport({
-    challenge, userId: 1, reps: 50, day: '2026-09-01',
-    photoFileId: 'file', photoUniqueId: 'same-shot', now: NOW,
-  });
-  assert.equal(first.ok, true);
-
-  // Вчерашний скриншот на следующий день не засчитывается.
-  const repeat = addReport({
-    challenge, userId: 1, reps: 50, day: '2026-09-02',
-    photoFileId: 'file', photoUniqueId: 'same-shot', now: NOW,
-  });
-  assert.equal(repeat.ok, false);
-
-  // И чужой скриншот тоже: в челлендже он уже был.
-  const stolen = addReport({
-    challenge, userId: 2, reps: 50, day: '2026-09-02',
-    photoFileId: 'file', photoUniqueId: 'same-shot', now: NOW,
-  });
-  assert.equal(stolen.ok, false);
-});
-
-test('отчёт вне срока и от чужого не принимается', () => {
-  const challenge = makeChallenge();
-  join(challenge, 2, 'Sergey');
-  startChallenge(challenge, '2026-09-01');
-
+  // Не участник.
+  assert.equal(report(challenge, 99, '2026-09-02', 50).ok, false);
+  // Все дни мимо срока — записывать нечего.
   assert.equal(report(challenge, 1, '2026-08-31', 50).ok, false);
   assert.equal(report(challenge, 1, '2026-09-11', 50).ok, false);
-  assert.equal(report(challenge, 99, '2026-09-02', 50).ok, false);
+  // Ноль отжиманий за день приложение не показывает, значение отбрасывается.
   assert.equal(report(challenge, 1, '2026-09-02', 0).ok, false);
 });
 

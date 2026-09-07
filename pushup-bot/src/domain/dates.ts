@@ -51,6 +51,21 @@ export function dayNumber(startDay: string, day: string): number {
   return diffDays(startDay, day) + 1;
 }
 
+/** День недели: 0 — воскресенье, как у Date#getUTCDay. */
+export function weekdayOf(day: string): number {
+  return new Date(`${day}T00:00:00Z`).getUTCDay();
+}
+
+/** Понедельник недели, в которую попадает день. */
+export function mondayOf(day: string): string {
+  return addDays(day, -((weekdayOf(day) + 6) % 7));
+}
+
+/** Дата нужного дня недели внутри недели, начинающейся с этого понедельника. */
+export function dateOfWeekday(monday: string, weekday: number): string {
+  return addDays(monday, (weekday + 6) % 7);
+}
+
 export function formatDayRu(day: string): string {
   const [year, month, date] = day.split('-');
   return `${date}.${month}.${year}`;

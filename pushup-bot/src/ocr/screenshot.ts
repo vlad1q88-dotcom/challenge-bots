@@ -21,21 +21,24 @@ export interface OcrPage {
   height: number;
 }
 
-export type ReadFailure =
-  | 'no-week-axis'
-  | 'no-today-column'
-  | 'no-bar-label'
-  | 'other-week'
-  | 'unrealistic';
+export type ReadFailure = 'no-week-axis' | 'no-bars' | 'unrealistic';
 
-export interface DailyRead {
+export interface DayRead {
+  /** День недели: 0 — воскресенье, как у Date#getUTCDay. */
+  weekday: number;
+  /** Подпись столбика на графике. */
+  label: string;
   reps: number;
-  /** Подпись дня недели, к которой привязались (Sat, Сб …). */
-  weekdayLabel: string;
   confidence: number;
 }
 
-export type ReadResult = { ok: true; value: DailyRead } | { ok: false; reason: ReadFailure };
+export interface WeekRead {
+  days: DayRead[];
+  /** Понедельник недели со скриншота, если удалось прочитать заголовок периода. */
+  weekStart: string | null;
+}
+
+export type ReadResult = { ok: true; value: WeekRead } | { ok: false; reason: ReadFailure };
 
 /** Сокращения дней недели: индекс совпадает с Date#getUTCDay. */
 const WEEKDAYS: readonly (readonly string[])[] = [
@@ -113,13 +116,11 @@ function isNumber(text: string): boolean {
 }
 
 /**
- * Период на скриншоте («Aug 31 - Sep 6», «31 авг – 6 сен»):
- * current — сегодняшний день внутри периода, other — чужая неделя,
- * unknown — заголовок не распознан.
+ * Диапазон в заголовке скриншота («Aug 31 - Sep 6», «31 авг – 6 сен»).
+ * Возвращает первый день диапазона или null, если заголовок не распознан.
  */
-export function readPeriod(words: readonly OcrWord[], day: string): 'current' | 'other' | 'unknown' {
-  const today = Date.parse(`${day}T00:00:00Z`);
-  const year = new Date(today).getUTCFullYear();
+export function readPeriodStart(words: readonly OcrWord[], today: string): string | null {
+  const year = new Date(`${today}T00:00:00Z`).getUTCFullYear();
 
   for (const line of linesOf(words).values()) {
     const tokens = line
@@ -142,24 +143,32 @@ export function readPeriod(words: readonly OcrWord[], day: string): 'current' | 
           : null;
       if (date !== null) pairs.push({ month, date });
     }
-    if (pairs.length !== 2) continue;
+    if (pairs.length < 1) continue;
 
-    const [from, to] = pairs as [{ month: number; date: number }, { month: number; date: number }];
-    for (const offset of [0, -1]) {
-      const start = Date.UTC(year + offset, from.month, from.date);
-      const endYear = year + offset + (to.month < from.month ? 1 : 0);
-      const end = Date.UTC(endYear, to.month, to.date);
-      if (start <= today && today <= end) return 'current';
+    const from = pairs[0]!;
+    // Год выбираем так, чтобы дата оказалась ближе всего к сегодняшнему дню.
+    let best: string | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const offset of [-1, 0, 1]) {
+      const candidate = new Date(Date.UTC(year + offset, from.month, from.date));
+      const distance = Math.abs(candidate.getTime() - Date.parse(`${today}T00:00:00Z`));
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = candidate.toISOString().slice(0, 10);
+      }
     }
-    return 'other';
+    // Полгода в сторону — уже не наш скриншот.
+    if (best && bestDistance < 200 * 24 * 60 * 60 * 1000) return best;
   }
-  return 'unknown';
+  return null;
 }
 
-/** Читает количество отжиманий за указанный день с недельного графика. */
-export function readDailyReps(page: OcrPage, day: string): ReadResult {
+/**
+ * Читает все столбики недельного графика: для каждой подписи дня недели
+ * ищет ближайшее число над ней. Столбики без подписи считаются «нет данных».
+ */
+export function readWeek(page: OcrPage, today: string): ReadResult {
   const { words } = page;
-  if (readPeriod(words, day) === 'other') return { ok: false, reason: 'other-week' };
 
   const weekdayWords = words
     .map((word) => ({ word, index: weekdayIndexOf(word.text) }))
@@ -176,14 +185,10 @@ export function readDailyReps(page: OcrPage, day: string): ReadResult {
       return Math.abs((first.y0 + first.y1) / 2 - itemCenter) <= 24;
     });
     if (row) row.push(item);
-    else rows.push([item]);
+    else rows.push(item ? [item] : []);
   }
   const axis = rows.sort((a, b) => b.length - a.length)[0] ?? [];
   if (axis.length < 3) return { ok: false, reason: 'no-week-axis' };
-
-  const todayIndex = new Date(`${day}T00:00:00Z`).getUTCDay();
-  const todayColumn = axis.find((item) => item.index === todayIndex);
-  if (!todayColumn) return { ok: false, reason: 'no-today-column' };
 
   const centers = axis.map((item) => centerX(item.word)).sort((a, b) => a - b);
   const gaps = centers.slice(1).map((value, index) => value - (centers[index] ?? 0));
@@ -200,38 +205,44 @@ export function readDailyReps(page: OcrPage, day: string): ReadResult {
     if (bottom < axisTop && bottom > chartTop) chartTop = bottom;
   }
 
-  const target = centerX(todayColumn.word);
-  const candidates = [...lines.values()]
-    // Подпись столбика стоит на строке одна: строки со словами («5 reps total») пропускаем.
-    .filter((line) => line.every((word) => isNumber(word.text)))
-    .flat()
-    .filter(
-      (word) =>
-        word.confidence >= 40 &&
-        word.y1 < axisTop - 8 &&
-        word.y0 > chartTop &&
-        Math.abs(centerX(word) - target) <= step * 0.55,
+  // Подписи столбиков: числа, рядом с которыми нет слов. Так строка-сводка
+  // («1 set · 5 reps total») отсекается, а случайный мусор от OCR где-то
+  // сбоку — уже нет.
+  const labels = [...lines.values()]
+    .flatMap((line) =>
+      line
+        .filter((word) => isNumber(word.text))
+        .filter((word) => {
+          const neighbours = line.filter((other) => other !== word && !isNumber(other.text));
+          return !neighbours.some((other) => {
+            const gap = Math.max(word.x0 - other.x1, other.x0 - word.x1);
+            return gap < step * 0.5;
+          });
+        }),
     )
-    .sort((a, b) => Math.abs(centerX(a) - target) - Math.abs(centerX(b) - target));
+    .filter((word) => word.confidence >= 40 && word.y1 < axisTop - 8 && word.y0 > chartTop);
 
-  const found = candidates[0];
-  if (!found) return { ok: false, reason: 'no-bar-label' };
+  const days: DayRead[] = [];
+  for (const column of axis) {
+    const target = centerX(column.word);
+    const found = labels
+      .filter((word) => Math.abs(centerX(word) - target) <= step * 0.55)
+      .sort((a, b) => Math.abs(centerX(a) - target) - Math.abs(centerX(b) - target))[0];
+    if (!found) continue;
+    const reps = Number(found.text);
+    if (!Number.isInteger(reps) || reps < 1 || reps > MAX_REPS) continue;
+    days.push({ weekday: column.index, label: column.word.text, reps, confidence: found.confidence });
+  }
 
-  const reps = Number(found.text);
-  if (!Number.isInteger(reps) || reps < 1 || reps > MAX_REPS) return { ok: false, reason: 'unrealistic' };
+  if (days.length === 0) return { ok: false, reason: 'no-bars' };
 
-  return {
-    ok: true,
-    value: { reps, weekdayLabel: todayColumn.word.text, confidence: found.confidence },
-  };
+  return { ok: true, value: { days, weekStart: readPeriodStart(words, today) } };
 }
 
 export const FAILURE_HINTS: Record<ReadFailure, string> = {
   'no-week-axis':
     'Не вижу недельный график. Открой в приложении вкладку <b>Week</b> — на скриншоте должны быть подписи дней (Mon…Sun) и столбики.',
-  'no-today-column': 'На скриншоте нет колонки за сегодня. Пришли недельный график (вкладка <b>Week</b>) за текущую неделю.',
-  'no-bar-label':
-    'Столбик за сегодня пустой — приложение ещё не показывает отжимания за этот день. Сделай подход, обнови экран и пришли скриншот снова.',
-  'other-week': 'Это скриншот другой недели. Пролистай график на текущую неделю и пришли снова.',
-  'unrealistic': 'Не смог разобрать число над сегодняшним столбиком. Пришли скриншот покрупнее, без обрезки графика.',
+  'no-bars':
+    'На графике нет ни одного столбика с числом. Сделай подход, обнови экран и пришли скриншот снова.',
+  'unrealistic': 'Не смог разобрать числа над столбиками. Пришли скриншот покрупнее, без обрезки графика.',
 };

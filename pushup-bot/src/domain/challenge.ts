@@ -142,53 +142,100 @@ export function startChallenge(challenge: Challenge, today: string): Result<Chal
   return ok(challenge);
 }
 
-export interface AddReportInput {
+export interface SyncEntry {
+  day: string;
+  reps: number;
+}
+
+export interface SyncChange {
+  day: string;
+  reps: number;
+  /** Прежнее значение, если день уже был засчитан. */
+  was?: number;
+}
+
+export interface SyncSummary {
+  added: SyncChange[];
+  updated: SyncChange[];
+  unchanged: SyncChange[];
+  /** Дни со скриншота, которые не относятся к челленджу. */
+  skipped: number;
+  total: number;
+}
+
+export interface SyncReportsInput {
   challenge: Challenge;
   userId: number;
-  reps: number;
-  day: string;
+  /** Значения по дням, снятые со скриншота. */
+  entries: readonly SyncEntry[];
+  today: string;
   photoFileId: string;
   photoUniqueId: string;
   now: Date;
-  source?: 'ocr' | 'manual';
 }
 
-export function addReport(input: AddReportInput): Result<Report> {
-  const { challenge, userId, reps, day, photoFileId, photoUniqueId, now } = input;
+/**
+ * Приводит отчёты участника в соответствие со скриншотом: значение каждого дня
+ * заменяется на то, что показывает приложение. Повторная отправка того же
+ * скриншота ничего не удваивает, а исправленный — обновляет день.
+ */
+export function syncReports(input: SyncReportsInput): Result<SyncSummary> {
+  const { challenge, userId, entries, today, photoFileId, photoUniqueId, now } = input;
   if (challenge.status !== 'active') {
     return fail('Челлендж ещё не запущен или уже завершён — отчёт не принят.');
   }
   if (!isParticipant(challenge, userId)) {
     return fail('Ты не участвуешь в этом челлендже.');
   }
-  if (!Number.isInteger(reps) || reps < 1 || reps > MAX_REPS_PER_REPORT) {
-    return fail(`Количество отжиманий — целое число от 1 до ${MAX_REPS_PER_REPORT}.`);
+
+  const summary: SyncSummary = { added: [], updated: [], unchanged: [], skipped: 0, total: 0 };
+
+  for (const entry of entries) {
+    const { day, reps } = entry;
+    if (!Number.isInteger(reps) || reps < 1 || reps > MAX_REPS_PER_REPORT) {
+      summary.skipped += 1;
+      continue;
+    }
+    // Дни вне срока челленджа и будущие дни не засчитываем.
+    const beforeStart = challenge.startDay !== null && compareDays(day, challenge.startDay) < 0;
+    const afterEnd = challenge.endDay !== null && compareDays(day, challenge.endDay) > 0;
+    if (beforeStart || afterEnd || compareDays(day, today) > 0) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    const existing = challenge.reports.find((report) => report.userId === userId && report.day === day);
+    if (!existing) {
+      challenge.reports.push({
+        userId,
+        day,
+        reps,
+        at: now.toISOString(),
+        photoFileId,
+        photoUniqueId,
+        source: 'ocr',
+      });
+      summary.added.push({ day, reps });
+      continue;
+    }
+    if (existing.reps === reps) {
+      summary.unchanged.push({ day, reps });
+      continue;
+    }
+    summary.updated.push({ day, reps, was: existing.reps });
+    existing.reps = reps;
+    existing.at = now.toISOString();
+    existing.photoFileId = photoFileId;
+    existing.photoUniqueId = photoUniqueId;
   }
-  if (challenge.startDay && compareDays(day, challenge.startDay) < 0) {
-    return fail('Челлендж ещё не начался.');
+
+  if (summary.added.length === 0 && summary.updated.length === 0 && summary.unchanged.length === 0) {
+    return fail('На скриншоте нет ни одного дня, который относится к этому челленджу.');
   }
-  if (challenge.endDay && compareDays(day, challenge.endDay) > 0) {
-    return fail('Челлендж уже закончился.');
-  }
-  // Главное правило: один отчёт в день, второй за тот же день не принимается.
-  if (hasReportOn(challenge, userId, day)) {
-    return fail('За сегодня отчёт уже принят. Больше одного отчёта в день нельзя.');
-  }
-  // Один и тот же скриншот второй раз в этот челлендж не проходит.
-  if (photoUniqueId && challenge.reports.some((item) => item.photoUniqueId === photoUniqueId)) {
-    return fail('Этот скриншот уже засчитан в этом челлендже. Нужен свежий.');
-  }
-  const report: Report = {
-    userId,
-    day,
-    reps,
-    at: now.toISOString(),
-    photoFileId,
-    photoUniqueId,
-    source: input.source ?? 'ocr',
-  };
-  challenge.reports.push(report);
-  return ok(report);
+
+  challenge.reports.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+  summary.total = totalReps(challenge, userId);
+  return ok(summary);
 }
 
 export interface ProgressRow {

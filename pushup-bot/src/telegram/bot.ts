@@ -15,11 +15,13 @@ import {
 import { checkNickname } from '../domain/nickname.ts';
 import { days as daysRu } from '../domain/plural.ts';
 import { createOcrEngine, type OcrEngine } from '../ocr/engine.ts';
-import { FAILURE_HINTS, readDailyReps } from '../ocr/screenshot.ts';
+import { FAILURE_HINTS, readWeek } from '../ocr/screenshot.ts';
 import { renderBadgeCard, type BadgeCardRow } from '../render/badges.ts';
 import { renderBoard } from '../render/leaderboard.ts';
 import { boardCaption, buildBoardView, escapeHtml } from '../render/view.ts';
-import type { ChallengeService, FinishedChallenge } from '../service.ts';
+import type { ChallengeService, FinishedChallenge, WeekEntry } from '../service.ts';
+import type { SyncSummary } from '../domain/challenge.ts';
+import { weekdayOf } from '../domain/dates.ts';
 import { inviteText } from './invite.ts';
 import type { BadgeCode, Challenge } from '../types.ts';
 import { HELP, RULES } from './texts.ts';
@@ -29,9 +31,10 @@ type Session =
   | { kind: 'join'; step: 'code' | 'nick'; code?: string }
   | { kind: 'nick'; code: string };
 
-/** Распознанный отчёт, который ждёт выбора челленджа. */
+/** Распознанная неделя, которая ждёт выбора челленджа. */
 interface PendingReport {
-  reps: number;
+  week: WeekEntry[];
+  weekStart: string | null;
   photoFileId: string;
   photoUniqueId: string;
   codes: string[];
@@ -168,17 +171,41 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     return {};
   }
 
-  async function submitReport(
+  const WEEKDAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+
+  /** Что именно бот записал: по дням, с пометкой исправленных. */
+  function describeSync(summary: SyncSummary): string {
+    const parts = [...summary.added, ...summary.updated, ...summary.unchanged]
+      .sort((a, b) => (a.day < b.day ? -1 : 1))
+      .map((change) => {
+        const name = WEEKDAY_NAMES[weekdayOf(change.day)] ?? '';
+        return change.was === undefined
+          ? `${name} ${change.reps}`
+          : `${name} ${change.reps} (было ${change.was})`;
+      });
+    return parts.join(' · ');
+  }
+
+  /** Насколько выросла сумма участника после синхронизации. */
+  function syncDelta(summary: SyncSummary): number {
+    const added = summary.added.reduce((sum, change) => sum + change.reps, 0);
+    const updated = summary.updated.reduce((sum, change) => sum + change.reps - (change.was ?? 0), 0);
+    return added + updated;
+  }
+
+  async function applyScreenshot(
     ctx: Context,
     code: string,
-    reps: number,
+    week: readonly WeekEntry[],
+    weekStart: string | null,
     photo: { fileId: string; uniqueId: string },
   ): Promise<void> {
     const id = userId(ctx);
-    const outcome = service.submitReport({
+    const outcome = service.submitScreenshot({
       code,
       userId: id,
-      reps,
+      week,
+      weekStart,
       photoFileId: photo.fileId,
       photoUniqueId: photo.uniqueId,
     });
@@ -188,26 +215,31 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     }
     await service.save();
 
-    const { challenge, streak, awarded } = outcome.value;
+    const { challenge, summary, streak, awarded } = outcome.value;
     const today = service.today(challenge.timezone);
     const nick = nicknameOf(challenge, id) ?? 'ты';
-    const done = totalReps(challenge, id);
     const goal = target(challenge);
-    const left = Math.max(goal - done, 0);
+    const left = Math.max(goal - summary.total, 0);
+    const delta = syncDelta(summary);
 
+    const changed = summary.added.length + summary.updated.length;
+    const head = changed > 0 ? `✅ Записал: <b>+${delta}</b>` : '✅ Всё уже засчитано, ничего не изменилось';
     const note =
-      `✅ Отчёт принят: <b>${reps}</b> отжиманий.\n` +
-      `Всего ${done} из ${goal}` +
+      `${head}\n${describeSync(summary)}\n` +
+      `Всего ${summary.total} из ${goal}` +
       (left > 0 ? ` · осталось ${left}` : ' · план выполнен 🎉') +
       `\nСерия: ${daysRu(streak)} подряд` +
       badgeLine(awarded);
 
     await sendBoardTo(ctx.chat?.id ?? id, challenge, note);
-    await broadcastBoard(
-      challenge,
-      `📣 <b>${escapeHtml(nick)}</b>: +${reps} (всего ${done} из ${goal}), день ${currentDayNumber(challenge, today)} из ${challenge.days}`,
-      id,
-    );
+    if (changed > 0) {
+      await broadcastBoard(
+        challenge,
+        `📣 <b>${escapeHtml(nick)}</b>: +${delta} (всего ${summary.total} из ${goal}), ` +
+          `день ${currentDayNumber(challenge, today)} из ${challenge.days}`,
+        id,
+      );
+    }
   }
 
   async function announceFinished(finished: readonly FinishedChallenge[]): Promise<void> {
@@ -601,13 +633,6 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       );
       return;
     }
-    const pending = active.filter(
-      (challenge) => !hasReportOn(challenge, id, service.today(challenge.timezone)),
-    );
-    if (pending.length === 0) {
-      await ctx.reply('За сегодня отчёты уже приняты во всех твоих челленджах. Больше одного отчёта в день нельзя.');
-      return;
-    }
 
     const status = await ctx.reply('🔍 Читаю скриншот…').catch(() => null);
     const clearStatus = async (): Promise<void> => {
@@ -615,16 +640,18 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       await ctx.api.deleteMessage(status.chat.id, status.message_id).catch(() => undefined);
     };
 
-    let reps: number;
+    let week: WeekEntry[];
+    let weekStart: string | null;
     try {
       const page = await ocr.read(await downloadPhoto(photo.fileId));
-      const read = readDailyReps(page, service.today(pending[0]!.timezone));
+      const read = readWeek(page, service.today(active[0]!.timezone));
       if (!read.ok) {
         await clearStatus();
         await ctx.reply(`❌ ${FAILURE_HINTS[read.reason]}`, { parse_mode: 'HTML' });
         return;
       }
-      reps = read.value.reps;
+      week = read.value.days.map((day) => ({ weekday: day.weekday, reps: day.reps }));
+      weekStart = read.value.weekStart;
     } catch (error) {
       console.error('Не удалось распознать скриншот:', error);
       await clearStatus();
@@ -633,21 +660,28 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     }
     await clearStatus();
 
-    if (pending.length === 1) {
-      await submitReport(ctx, pending[0]!.id, reps, photo);
+    if (active.length === 1) {
+      await applyScreenshot(ctx, active[0]!.id, week, weekStart, photo);
       return;
     }
 
-    // Один скриншот — один рабочий день, поэтому его можно засчитать сразу во все борды.
-    pendingReports.set(id, { reps, photoFileId: photo.fileId, photoUniqueId: photo.uniqueId, codes: pending.map((challenge) => challenge.id) });
-    const keyboard = new InlineKeyboard().text(`Во все челленджи (${pending.length})`, 'rep:*').row();
-    for (const challenge of pending) {
+    // Один скриншот — одна неделя тренировок, его можно занести сразу во все борды.
+    pendingReports.set(id, {
+      week,
+      weekStart,
+      photoFileId: photo.fileId,
+      photoUniqueId: photo.uniqueId,
+      codes: active.map((challenge) => challenge.id),
+    });
+    const total = week.reduce((sum, day) => sum + day.reps, 0);
+    const keyboard = new InlineKeyboard().text(`Во все челленджи (${active.length})`, 'rep:*').row();
+    for (const challenge of active) {
       keyboard.text(`${challenge.title} (${challenge.id})`, `rep:${challenge.id}`).row();
     }
-    await ctx.reply(`Распознал <b>${reps}</b> отжиманий за сегодня. Куда засчитать?`, {
-      parse_mode: 'HTML',
-      reply_markup: keyboard,
-    });
+    await ctx.reply(
+      `Прочитал неделю: ${week.length} ${week.length === 1 ? 'день' : 'дн.'}, всего ${total}. Куда записать?`,
+      { reply_markup: keyboard },
+    );
   });
 
   bot.on('callback_query:data', async (ctx) => {
@@ -667,7 +701,7 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       const photo = { fileId: report.photoFileId, uniqueId: report.photoUniqueId };
       const codes = target === '*' ? report.codes : [target];
       for (const code of codes) {
-        await submitReport(ctx, code, report.reps, photo);
+        await applyScreenshot(ctx, code, report.week, report.weekStart, photo);
       }
       return;
     }

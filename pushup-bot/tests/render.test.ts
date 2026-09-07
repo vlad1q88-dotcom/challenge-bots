@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addReport, createChallenge, finalize, joinChallenge, startChallenge } from '../src/domain/challenge.ts';
+import { createChallenge, finalize, joinChallenge, startChallenge, syncReports } from '../src/domain/challenge.ts';
 import { renderBoard } from '../src/render/leaderboard.ts';
 import { buildBoardView } from '../src/render/view.ts';
 import { parseReps } from '../src/telegram/bot.ts';
@@ -18,9 +18,24 @@ function sample(): Challenge {
   const challenge = created.value;
   joinChallenge(challenge, 2, 'Максимка', NOW);
   startChallenge(challenge, '2026-09-01');
-  addReport({ challenge, photoUniqueId: 'p101', userId: 1, reps: 10, day: '2026-09-01', photoFileId: 'p', now: NOW });
-  addReport({ challenge, photoUniqueId: 'p102', userId: 1, reps: 15, day: '2026-09-02', photoFileId: 'p', now: NOW });
-  addReport({ challenge, photoUniqueId: 'p202', userId: 2, reps: 60, day: '2026-09-02', photoFileId: 'p', now: NOW });
+  syncReports({
+    challenge,
+    userId: 1,
+    entries: [{ day: '2026-09-01', reps: 10 }, { day: '2026-09-02', reps: 15 }],
+    today: '2026-09-03',
+    photoFileId: 'p',
+    photoUniqueId: 'p1',
+    now: NOW,
+  });
+  syncReports({
+    challenge,
+    userId: 2,
+    entries: [{ day: '2026-09-02', reps: 60 }],
+    today: '2026-09-03',
+    photoFileId: 'p',
+    photoUniqueId: 'p2',
+    now: NOW,
+  });
   return challenge;
 }
 

@@ -31,6 +31,17 @@ function создать(service: ChallengeService, ownerId: number, nickname: st
   return created.value;
 }
 
+/** Скриншот с одним днём — как будто участник прислал его в этот день. */
+function отчёт(service: ChallengeService, code: string, userId: number, day: string, reps: number) {
+  return service.submitScreenshot({
+    code,
+    userId,
+    week: [{ weekday: new Date(`${day}T00:00:00Z`).getUTCDay(), reps }],
+    weekStart: day,
+    photoFileId: 'p',
+  });
+}
+
 function запустить(service: ChallengeService, challenge: Challenge, rivalId: number): void {
   const joined = service.join(challenge.id, rivalId, `rival${rivalId}`);
   assert.equal(joined.ok, true, joined.ok ? '' : joined.error);
@@ -62,7 +73,7 @@ test('одновременно не больше трёх лидер-бордо�
   assert.equal(replacement.colorIndex, 1);
 });
 
-test('в один день можно отчитаться в каждый челлендж, но только один раз', async () => {
+test('скриншот записывается в каждый челлендж и не удваивает день', async () => {
   const clock = new Clock('2026-09-01');
   const service = await makeService(clock);
   service.upsertUser(1, 1, 'Vlad');
@@ -71,9 +82,17 @@ test('в один день можно отчитаться в каждый че�
   запустить(service, first, 2);
   запустить(service, second, 3);
 
-  assert.equal(service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' }).ok, true);
-  assert.equal(service.submitReport({ code: second.id, userId: 1, reps: 12, photoFileId: 'p' }).ok, true);
-  assert.equal(service.submitReport({ code: first.id, userId: 1, reps: 5, photoFileId: 'p' }).ok, false);
+  assert.equal(отчёт(service, first.id, 1, '2026-09-01', 10).ok, true);
+  assert.equal(отчёт(service, second.id, 1, '2026-09-01', 12).ok, true);
+
+  // Повторный скриншот того же дня не удваивает, а подтверждает значение.
+  const repeat = отчёт(service, first.id, 1, '2026-09-01', 10);
+  assert.equal(repeat.ok && repeat.value.summary.unchanged.length, 1);
+  assert.equal(repeat.ok && repeat.value.summary.total, 10);
+
+  // Исправленное значение заменяет прежнее.
+  const corrected = отчёт(service, first.id, 1, '2026-09-01', 25);
+  assert.equal(corrected.ok && corrected.value.summary.total, 25);
 });
 
 test('серия считается внутри челленджа и не собирается из разных', async () => {
@@ -86,36 +105,85 @@ test('серия считается внутри челленджа и не со
   запустить(service, second, 3);
 
   // Три дня подряд, но по очереди в разные челленджи — серии не выходит.
-  service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
+  отчёт(service, first.id, 1, '2026-09-01', 10);
   clock.set('2026-09-02');
-  service.submitReport({ code: second.id, userId: 1, reps: 10, photoFileId: 'p' });
+  отчёт(service, second.id, 1, '2026-09-02', 10);
   clock.set('2026-09-03');
-  const split = service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
+  const split = отчёт(service, first.id, 1, '2026-09-03', 10);
   assert.equal(split.ok && split.value.streak, 1);
   assert.deepEqual(split.ok && split.value.awarded, []);
 
   // А три дня подряд в одном челлендже — уже серия и бейдж.
   clock.set('2026-09-04');
-  service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
+  отчёт(service, first.id, 1, '2026-09-04', 10);
   clock.set('2026-09-05');
-  const third = service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
+  const third = отчёт(service, first.id, 1, '2026-09-05', 10);
   assert.equal(third.ok && third.value.streak, 3);
   assert.deepEqual(third.ok && third.value.awarded, ['streak_3']);
 
   // Тот же бейдж второй раз не выдаётся, даже в другом челлендже.
   for (const day of ['2026-09-06', '2026-09-07', '2026-09-08']) {
     clock.set(day);
-    const again = service.submitReport({ code: second.id, userId: 1, reps: 10, photoFileId: 'p' });
+    const again = отчёт(service, second.id, 1, day, 10);
     assert.deepEqual(again.ok && again.value.awarded, []);
   }
 
   // Пропуск обнуляет серию.
   clock.set('2026-09-10');
-  const afterGap = service.submitReport({ code: first.id, userId: 1, reps: 10, photoFileId: 'p' });
+  const afterGap = отчёт(service, first.id, 1, '2026-09-10', 10);
   assert.equal(afterGap.ok && afterGap.value.streak, 1);
 
   // Сводка для /badges: текущая серия — после пропуска снова 1, рекорд остаётся 3.
   assert.deepEqual(service.streaks(1), { current: 1, best: 3 });
+});
+
+test('один скриншот за неделю закрывает сразу несколько дней', async () => {
+  const clock = new Clock('2026-09-06');
+  const service = await makeService(clock);
+  service.upsertUser(1, 1, 'Vlad');
+  const challenge = создать(service, 1, 'Vlad', 14, 50);
+  // Старт в понедельник этой недели.
+  clock.set('2026-08-31');
+  запустить(service, challenge, 2);
+  clock.set('2026-09-06');
+
+  // Скриншот вкладки Week: Пн 60, Ср 40, Сб 80 (0 — воскресенье).
+  const result = service.submitScreenshot({
+    code: challenge.id,
+    userId: 1,
+    week: [
+      { weekday: 1, reps: 60 },
+      { weekday: 3, reps: 40 },
+      { weekday: 6, reps: 80 },
+    ],
+    weekStart: '2026-08-31',
+    photoFileId: 'p',
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) throw new Error('нет результата');
+  assert.deepEqual(result.value.summary.added.map((change) => change.day), [
+    '2026-08-31',
+    '2026-09-02',
+    '2026-09-05',
+  ]);
+  assert.equal(result.value.summary.total, 180);
+
+  // Та же неделя ещё раз: ничего не удвоилось.
+  const again = service.submitScreenshot({
+    code: challenge.id, userId: 1,
+    week: [{ weekday: 1, reps: 60 }, { weekday: 3, reps: 40 }, { weekday: 6, reps: 80 }],
+    weekStart: '2026-08-31', photoFileId: 'p',
+  });
+  assert.equal(again.ok && again.value.summary.total, 180);
+  assert.equal(again.ok && again.value.summary.unchanged.length, 3);
+
+  // Без заголовка периода дни ложатся на текущую неделю.
+  const noHeader = service.submitScreenshot({
+    code: challenge.id, userId: 1,
+    week: [{ weekday: 5, reps: 30 }],
+    weekStart: null, photoFileId: 'p',
+  });
+  assert.deepEqual(noHeader.ok && noHeader.value.summary.added.map((c) => c.day), ['2026-09-04']);
 });
 
 test('по истечении срока челлендж закрывается и раздаёт итоговые бейджи', async () => {
@@ -126,10 +194,10 @@ test('по истечении срока челлендж закрывается
   const challenge = создать(service, 1, 'Vlad', 2, 10); // цель 20
   запустить(service, challenge, 2);
 
-  service.submitReport({ code: challenge.id, userId: 1, reps: 15, photoFileId: 'p' });
-  service.submitReport({ code: challenge.id, userId: 2, reps: 5, photoFileId: 'p' });
+  отчёт(service, challenge.id, 1, '2026-09-01', 15);
+  отчёт(service, challenge.id, 2, '2026-09-01', 5);
   clock.set('2026-09-02');
-  service.submitReport({ code: challenge.id, userId: 1, reps: 15, photoFileId: 'p' });
+  отчёт(service, challenge.id, 1, '2026-09-02', 15);
 
   assert.deepEqual(service.finishDue(), []);
 
@@ -162,7 +230,7 @@ test('данные переживают перезапуск', async () => {
   service.upsertUser(1, 1, 'Vlad');
   const challenge = создать(service, 1, 'Vlad');
   запустить(service, challenge, 2);
-  service.submitReport({ code: challenge.id, userId: 1, reps: 25, photoFileId: 'p' });
+  отчёт(service, challenge.id, 1, '2026-09-01', 25);
   await service.save();
 
   const reopened = new Store(file);
