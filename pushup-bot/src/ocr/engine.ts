@@ -1,12 +1,62 @@
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
-import { loadImage } from '@napi-rs/canvas';
+import { createCanvas, loadImage } from '@napi-rs/canvas';
 import { createWorker, type Worker } from 'tesseract.js';
 import type { OcrPage, OcrWord } from './screenshot.ts';
 
 export interface OcrEngine {
   read(image: Buffer): Promise<OcrPage>;
   close(): Promise<void>;
+}
+
+/** Чтобы мелкие подписи читались, картинку доводим примерно до этой ширины. */
+const TARGET_WIDTH = 1200;
+
+/**
+ * Готовит скриншот к распознаванию: увеличивает мелкие картинки и оставляет
+ * только текст. Заливку столбиков убираем — иначе подпись, стоящая вплотную
+ * к яркому столбику, слипается с ним в одно пятно и читается как мусор.
+ */
+async function prepare(image: Buffer): Promise<{ data: Buffer; width: number; height: number }> {
+  const picture = await loadImage(image);
+  const factor = Math.min(3, Math.max(1, Math.round(TARGET_WIDTH / picture.width)));
+  const width = picture.width * factor;
+  const height = picture.height * factor;
+
+  const canvas = createCanvas(width, height);
+  const context = canvas.getContext('2d');
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(picture, 0, 0, width, height);
+
+  const pixels = context.getImageData(0, 0, width, height);
+  const { data } = pixels;
+
+  // Тёмная тема или светлая: смотрим на среднюю яркость.
+  let sum = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    sum += (data[i]! + data[i + 1]! + data[i + 2]!) / 3;
+  }
+  const darkTheme = sum / (data.length / 4) < 128;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i]!;
+    const g = data[i + 1]!;
+    const b = data[i + 2]!;
+    const min = Math.min(r, g, b);
+    const max = Math.max(r, g, b);
+    // Текст почти серый: каналы близки. Цветные столбики отсеиваем по разбросу.
+    const neutral = max - min < 48;
+    // Порог берём с запасом: подписи дней бывают тускло-серыми.
+    const isText = darkTheme ? neutral && min > 60 : neutral && max < 190;
+    const value = isText ? 0 : 255;
+    data[i] = value;
+    data[i + 1] = value;
+    data[i + 2] = value;
+    data[i + 3] = 255;
+  }
+  context.putImageData(pixels, 0, 0);
+  return { data: canvas.toBuffer('image/png'), width, height };
 }
 
 /** Языковые данные ставятся из npm, так что в рантайме сеть не нужна. */
@@ -44,8 +94,8 @@ export function createOcrEngine(): OcrEngine {
   return {
     read(image: Buffer): Promise<OcrPage> {
       return enqueue(async () => {
-        const [picture, engine] = await Promise.all([loadImage(image), getWorker()]);
-        const { data } = await engine.recognize(image, {}, { blocks: true });
+        const [picture, engine] = await Promise.all([prepare(image), getWorker()]);
+        const { data } = await engine.recognize(picture.data, {}, { blocks: true });
         const words: OcrWord[] = [];
         let line = 0;
         for (const block of data.blocks ?? []) {
