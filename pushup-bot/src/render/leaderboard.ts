@@ -117,8 +117,9 @@ export function renderBoard(view: BoardView): Buffer {
   const width = Math.max(760, plotWidth + PADDING * 2);
   const headerHeight = 232;
   const hasBadges = view.rows.some((row) => (row.badges?.length ?? 0) > 0);
-  const footerHeight = (view.status === 'finished' ? 146 : 122) + (hasBadges ? 52 : 0);
-  const height = headerHeight + TRACK_HEIGHT + footerHeight + PADDING;
+  // Под столбиками: дни, серия, медали и — на финише — итог участника.
+  const footerHeight = (view.status === 'finished' ? 134 : 88) + (hasBadges ? 52 : 0);
+  const height = headerHeight + TRACK_HEIGHT + footerHeight;
 
   ensureFonts();
   const canvas = createCanvas(width, height);
@@ -216,8 +217,9 @@ export function renderBoard(view: BoardView): Buffer {
       labelY,
     );
 
-    const medals = row.badges ?? [];
-    if (medals.length > 0) {
+    // Ряд медалей резервируем на всём борде, чтобы итоги стояли на одной линии.
+    if (hasBadges) {
+      const medals = row.badges ?? [];
       const radius = 15;
       const step = radius * 2 + 6;
       const start = centerX - ((medals.length - 1) * step) / 2;
@@ -269,19 +271,6 @@ export function renderBoard(view: BoardView): Buffer {
     context.fillStyle = '#C9C9D2';
     context.fillText(label, labelX, paceY - 12);
   }
-
-  // Подвал.
-  context.textAlign = 'left';
-  context.fillStyle = MUTED;
-  context.font = font(18);
-  context.fillText(
-    `код ${view.code} · ${view.todayLabel} · один отчёт в день`,
-    PADDING,
-    height - 26,
-  );
-  context.textAlign = 'right';
-  context.fillStyle = color.base;
-  context.fillText(`борд · ${color.name}`, width - PADDING, height - 26);
 
   return canvas.toBuffer('image/png');
 }

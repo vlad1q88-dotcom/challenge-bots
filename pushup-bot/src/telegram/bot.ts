@@ -139,8 +139,8 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       ? row.champion
         ? `🏆 чемпион, ${row.total}`
         : row.completed
-          ? `🎖 выполнено, ${row.total}`
-          : `💀 не хватило ${row.deficit}`
+          ? `🏅 выполнено, ${row.total}`
+          : `👎 не хватило ${row.deficit}`
       : '—';
     return `${head}\n${challenge.status === 'finished' ? 'Завершён' : 'Отменён'} · ${verdict}`;
   }

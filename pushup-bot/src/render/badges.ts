@@ -74,26 +74,39 @@ function trophy(context: SKRSContext2D, cx: number, cy: number, size: number, co
   context.stroke();
 }
 
-function checkMark(context: SKRSContext2D, cx: number, cy: number, size: number, color: string): void {
-  context.strokeStyle = color;
-  context.lineWidth = Math.max(2, size * 0.13);
-  context.lineCap = 'round';
-  context.lineJoin = 'round';
+function star(context: SKRSContext2D, cx: number, cy: number, radius: number, color: string): void {
+  const inner = radius * 0.46;
+  context.fillStyle = color;
   context.beginPath();
-  context.moveTo(cx - size * 0.3, cy + size * 0.02);
-  context.lineTo(cx - size * 0.06, cy + size * 0.26);
-  context.lineTo(cx + size * 0.32, cy - size * 0.26);
-  context.stroke();
+  for (let point = 0; point < 10; point += 1) {
+    const angle = -Math.PI / 2 + (point * Math.PI) / 5;
+    const distance = point % 2 === 0 ? radius : inner;
+    const x = cx + Math.cos(angle) * distance;
+    const y = cy + Math.sin(angle) * distance;
+    if (point === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  }
+  context.closePath();
+  context.fill();
 }
 
-function slash(context: SKRSContext2D, cx: number, cy: number, size: number, color: string): void {
-  context.strokeStyle = color;
-  context.lineWidth = Math.max(2, size * 0.13);
-  context.lineCap = 'round';
-  context.beginPath();
-  context.moveTo(cx - size * 0.28, cy + size * 0.28);
-  context.lineTo(cx + size * 0.28, cy - size * 0.28);
-  context.stroke();
+/** Палец вниз: кулак, отогнутый большой палец и обшлаг рукава. */
+function thumbDown(context: SKRSContext2D, cx: number, cy: number, size: number, color: string): void {
+  context.save();
+  context.translate(cx, cy);
+  context.scale(size, size); // ось Y вниз: большой палец смотрит вниз
+  context.fillStyle = color;
+
+  const box = (x0: number, y0: number, x1: number, y1: number, r: number): void => {
+    context.beginPath();
+    context.roundRect(x0, y0, x1 - x0, y1 - y0, r);
+    context.fill();
+  };
+
+  box(-0.22, -0.44, 0.44, 0.16, 0.17); // кулак
+  box(-0.08, 0.1, 0.22, 0.56, 0.14); // большой палец
+  box(-0.52, -0.36, -0.32, 0.06, 0.07); // обшлаг рукава
+  context.restore();
 }
 
 /** Медаль: круг с цифрой серии или со знаком чемпиона / финишера / лузера. */
@@ -140,8 +153,8 @@ export function drawBadge(
     return;
   }
   if (code === 'champion') trophy(context, cx, cy, radius * 1.5, ink);
-  else if (code === 'finisher') checkMark(context, cx, cy, radius, ink);
-  else slash(context, cx, cy, radius, ink);
+  else if (code === 'finisher') star(context, cx, cy, radius * 0.62, ink);
+  else thumbDown(context, cx, cy, radius * 1.15, ink);
 }
 
 export interface BadgeCardRow {
@@ -215,6 +228,6 @@ export function renderBadgeCard(view: BadgeCardView): Buffer {
   context.textAlign = 'left';
   context.fillStyle = MUTED;
   context.font = fontOf(18);
-  context.fillText('Серия считается внутри челленджа: пропуск обнуляет её, новый челлендж начинает заново', padding, height - 34);
+  context.fillText('Серия считается внутри челленджа и обнуляется после пропуска', padding, height - 34);
   return canvas.toBuffer('image/png');
 }

@@ -61,10 +61,10 @@ export const BADGES: BadgeMeta[] = [
     description: 'Победа в челлендже среди перевыполнивших план',
   },
   {
-    code: 'finisher', icon: '🎖', short: 'Финишер', title: 'Финишер',
+    code: 'finisher', icon: '🏅', short: 'Финишер', title: 'Финишер',
     description: 'Челлендж выполнен полностью',
   },
-  { code: 'loser', icon: '💀', short: 'Лузер', title: 'Лузер', description: 'Челлендж провален' },
+  { code: 'loser', icon: '👎', short: 'Лузер', title: 'Лузер', description: 'Челлендж провален' },
 ];
 
 const BY_CODE = new Map(BADGES.map((badge) => [badge.code, badge]));

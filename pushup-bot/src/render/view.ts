@@ -86,7 +86,7 @@ export function boardCaption(challenge: Challenge, today: string): string {
   if (challenge.status === 'finished' && challenge.results) {
     lines.push('');
     for (const row of challenge.results.rows) {
-      const mark = row.champion ? '🏆' : row.completed ? '🎖' : '💀';
+      const mark = row.champion ? '🏆' : row.completed ? '🏅' : '👎';
       const tail = row.completed
         ? `выполнил${row.overachieved ? ` (+${row.total - row.target})` : ''}`
         : `не хватило ${row.deficit}`;
