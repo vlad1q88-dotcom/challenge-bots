@@ -1,6 +1,6 @@
 import { createCanvas, type SKRSContext2D } from '@napi-rs/canvas';
 import { badgeMeta } from '../domain/badges.ts';
-import { ensureFonts, fontOf } from './fonts.ts';
+import { emojiFont, ensureFonts, fontOf } from './fonts.ts';
 import type { BadgeCode } from '../types.ts';
 
 export interface BadgePalette {
@@ -120,6 +120,21 @@ export function drawBadge(
 ): void {
   const palette = badgePalette(code, earned);
   const meta = badgeMeta(code);
+
+  // Финишер и лузер — настоящие эмодзи, без нарисованной медали под ними.
+  if (code === 'finisher' || code === 'loser') {
+    const font = emojiFont(radius * 2.1);
+    if (font) {
+      context.save();
+      context.globalAlpha = earned ? 1 : 0.22;
+      context.font = font;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(meta.icon, cx, cy);
+      context.restore();
+      return;
+    }
+  }
 
   const gradient = context.createLinearGradient(0, cy - radius, 0, cy + radius);
   gradient.addColorStop(0, palette.light);
