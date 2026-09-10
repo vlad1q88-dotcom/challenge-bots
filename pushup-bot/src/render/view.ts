@@ -6,18 +6,13 @@ import { bestStreak, currentStreak } from '../domain/streaks.ts';
 import type { BadgeCode, Challenge } from '../types.ts';
 import type { BoardRowView, BoardView } from './leaderboard.ts';
 
-/** Самые «дорогие» бейджи участника: длинные серии и итог челленджа. */
-export function topBadges(codes: readonly BadgeCode[], limit = 3): BadgeCode[] {
-  const outcome = codes.filter((code) => code === 'champion' || code === 'finisher');
-  const streaks = codes
+/** Самые длинные серии участника — их медали идут под столбиком. */
+export function topStreakBadges(codes: readonly BadgeCode[], limit = 3): BadgeCode[] {
+  return codes
     .filter((code) => badgeMeta(code).streak !== undefined)
-    .sort((a, b) => (badgeMeta(b).streak ?? 0) - (badgeMeta(a).streak ?? 0));
-  const unique: BadgeCode[] = [];
-  for (const code of [...outcome.slice(0, 1), ...streaks]) {
-    if (!unique.includes(code)) unique.push(code);
-    if (unique.length === limit) break;
-  }
-  return unique;
+    .sort((a, b) => (badgeMeta(b).streak ?? 0) - (badgeMeta(a).streak ?? 0))
+    .filter((code, index, all) => all.indexOf(code) === index)
+    .slice(0, limit);
 }
 
 export function buildBoardView(
@@ -36,7 +31,11 @@ export function buildBoardView(
       reportedDays: row.reportedDays,
       streak: row.bestStreak,
       percent: goal > 0 ? row.total / goal : 0,
-      badges: topBadges(badgesOf(row.userId)),
+      // Итог челленджа берём из его же результатов, а не из общей коллекции.
+      badges: [
+        row.champion ? 'champion' : row.completed ? 'finisher' : 'loser',
+        ...topStreakBadges(badgesOf(row.userId), 2),
+      ] as BadgeCode[],
       place: row.place,
       champion: row.champion,
       completed: row.completed,
@@ -50,7 +49,7 @@ export function buildBoardView(
         reportedDays: row.reportedDays,
         streak: row.streak,
         percent: row.percent,
-        badges: topBadges(badgesOf(row.userId)),
+        badges: topStreakBadges(badgesOf(row.userId)),
       }))
       .sort((a, b) => b.total - a.total || a.nickname.localeCompare(b.nickname, 'ru'));
   }

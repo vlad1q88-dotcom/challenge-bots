@@ -2,17 +2,17 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BADGES } from '../src/domain/badges.ts';
 import { renderBadgeCard, type BadgeCardRow } from '../src/render/badges.ts';
-import { topBadges } from '../src/render/view.ts';
+import { topStreakBadges } from '../src/render/view.ts';
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 
-test('на борде показываются самые ценные бейджи', () => {
+test('под столбиком показываются самые длинные серии', () => {
   const codes = ['streak_3', 'streak_7', 'streak_10', 'streak_14', 'finisher', 'loser'] as const;
-  // Итог челленджа первым, дальше — самые длинные серии.
-  assert.deepEqual(topBadges([...codes]), ['finisher', 'streak_14', 'streak_10']);
-  assert.deepEqual(topBadges(['streak_3']), ['streak_3']);
-  assert.deepEqual(topBadges([]), []);
-  assert.equal(topBadges([...codes], 2).length, 2);
+  // Итоговые бейджи сюда не попадают: они берутся из результатов челленджа.
+  assert.deepEqual(topStreakBadges([...codes]), ['streak_14', 'streak_10', 'streak_7']);
+  assert.deepEqual(topStreakBadges(['streak_3']), ['streak_3']);
+  assert.deepEqual(topStreakBadges([]), []);
+  assert.equal(topStreakBadges([...codes], 2).length, 2);
 });
 
 test('витрина бейджей рисуется в PNG', () => {

@@ -121,8 +121,8 @@ export function drawBadge(
   const palette = badgePalette(code, earned);
   const meta = badgeMeta(code);
 
-  // Финишер и лузер — настоящие эмодзи, без нарисованной медали под ними.
-  if (code === 'finisher' || code === 'loser') {
+  // Итоговые бейджи — настоящие эмодзи, без нарисованной медали под ними.
+  if (code === 'champion' || code === 'finisher' || code === 'loser') {
     const font = emojiFont(radius * 2.1);
     if (font) {
       context.save();
