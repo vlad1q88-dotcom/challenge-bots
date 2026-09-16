@@ -13,6 +13,7 @@
   "dependencies": {
     "@napi-rs/canvas": "^0.1.86",
     "@tesseract.js-data/eng": "^1.0.0",
+    "gifenc": "^1.0.3",
     "grammy": "^1.40.1",
     "tesseract.js": "^7.0.0"
   },

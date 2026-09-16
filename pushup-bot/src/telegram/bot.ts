@@ -17,6 +17,7 @@ import { days as daysRu } from '../domain/plural.ts';
 import { createOcrEngine, type OcrEngine } from '../ocr/engine.ts';
 import { FAILURE_HINTS, readWeek } from '../ocr/screenshot.ts';
 import { renderBadgeCard, type BadgeCardRow } from '../render/badges.ts';
+import { renderCelebration } from '../render/celebrate.ts';
 import { renderBoard } from '../render/leaderboard.ts';
 import { boardCaption, buildBoardView, escapeHtml } from '../render/view.ts';
 import type { ChallengeService, FinishedChallenge, WeekEntry } from '../service.ts';
@@ -169,6 +170,59 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     return {};
   }
 
+  /** Полноэкранное конфетти Telegram (эффект 🎉, работает в личных чатах). */
+  const CONFETTI_EFFECT = '5046509860389126442';
+
+  /**
+   * Отправляет открытку с конфетти. Эффект Telegram работает не везде, поэтому
+   * при отказе шлём без него. Возвращает file_id, чтобы следующим участникам
+   * не загружать ту же гифку заново.
+   */
+  async function sendCelebration(
+    chatId: number,
+    animation: Buffer | string,
+    caption: string,
+  ): Promise<string | undefined> {
+    const file = typeof animation === 'string' ? animation : new InputFile(animation, 'birthday.gif');
+    const options = { caption, parse_mode: 'HTML' as const };
+    try {
+      const message = await bot.api.sendAnimation(chatId, file, {
+        ...options,
+        message_effect_id: CONFETTI_EFFECT,
+      });
+      return message.animation?.file_id ?? message.document?.file_id;
+    } catch {
+      const message = await bot.api
+        .sendAnimation(chatId, file, options)
+        .catch((error: unknown) => {
+          console.error('Не удалось отправить поздравление:', error);
+          return undefined;
+        });
+      return message?.animation?.file_id ?? message?.document?.file_id;
+    }
+  }
+
+  /** Поздравляет именинника и показывает праздник остальным участникам. */
+  async function celebrateBirthday(challenge: Challenge, birthdayUserId: number): Promise<void> {
+    const nickname = nicknameOf(challenge, birthdayUserId) ?? 'Именинник';
+    let animation: Buffer | string = renderCelebration({ nickname, colorIndex: challenge.colorIndex });
+
+    // Именинник получает открытку первым.
+    const order = [...challenge.participants].sort((a, b) =>
+      a.userId === birthdayUserId ? -1 : b.userId === birthdayUserId ? 1 : 0,
+    );
+    for (const participant of order) {
+      const chatId = service.user(participant.userId)?.chatId;
+      if (chatId === undefined) continue;
+      const caption =
+        participant.userId === birthdayUserId
+          ? '🎂 <b>С днём рождения!</b>\nНорму в свой день ты выполнил — бейдж «Именинник» твой.'
+          : `🎂 У <b>${escapeHtml(nickname)}</b> сегодня день рождения — и норма уже выполнена. Поздравляем!`;
+      const fileId = await sendCelebration(chatId, animation, caption);
+      if (fileId) animation = fileId;
+    }
+  }
+
   const WEEKDAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
   /** Что именно бот записал: по дням, с пометкой исправленных. */
@@ -228,6 +282,8 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       (left > 0 ? ` · осталось ${left}` : ' · план выполнен 🎉') +
       `\nСерия: ${daysRu(streak)} подряд` +
       badgeLine(awarded);
+
+    if (awarded.includes('birthday')) await celebrateBirthday(challenge, id);
 
     await sendBoardTo(ctx.chat?.id ?? id, challenge, note);
     if (changed > 0) {
@@ -621,13 +677,14 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
 
     if (awarded.length === 0) return;
     const challenge = service.challenge(code.toUpperCase());
-    const chatId = challenge ? service.user(result.value.userId)?.chatId : undefined;
-    if (!challenge || chatId === undefined) return;
-    await sendBoardTo(
-      chatId,
-      challenge,
-      '🎂 <b>С днём рождения!</b>\nНорму в свой день ты выполнил — держи бейдж «Именинник».',
-    ).catch((error: unknown) => console.error('Не удалось поздравить именинника:', error));
+    if (!challenge) return;
+    await celebrateBirthday(challenge, result.value.userId);
+    const chatId = service.user(result.value.userId)?.chatId;
+    if (chatId !== undefined) {
+      await sendBoardTo(chatId, challenge, '🎂 Бейдж «Именинник» добавлен в коллекцию — /badges').catch(
+        (error: unknown) => console.error('Не удалось отправить борд имениннику:', error),
+      );
+    }
   });
 
   bot.command('badges', async (ctx) => {
