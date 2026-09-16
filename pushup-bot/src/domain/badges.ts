@@ -65,6 +65,10 @@ export const BADGES: BadgeMeta[] = [
     description: 'Челлендж выполнен полностью',
   },
   { code: 'loser', icon: '👎', short: 'Лузер', title: 'Лузер', description: 'Челлендж провален' },
+  {
+    code: 'birthday', icon: '🎂', short: 'Именинник', title: 'Именинник',
+    description: 'Норма выполнена в свой день рождения',
+  },
 ];
 
 const BY_CODE = new Map(BADGES.map((badge) => [badge.code, badge]));
@@ -90,7 +94,8 @@ export function newBadges(
 ): BadgeCode[] {
   const result: BadgeCode[] = [];
   for (const code of candidates) {
-    const repeatable = code === 'champion' || code === 'finisher' || code === 'loser';
+    // Итоговые бейджи и торт выдаются заново в каждом новом контексте.
+    const repeatable = code === 'champion' || code === 'finisher' || code === 'loser' || code === 'birthday';
     const has = owned.some(
       (badge) => badge.code === code && (!repeatable || badge.challengeId === challengeId),
     );

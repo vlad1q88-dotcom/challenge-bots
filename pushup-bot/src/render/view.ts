@@ -6,13 +6,16 @@ import { bestStreak, currentStreak } from '../domain/streaks.ts';
 import type { BadgeCode, Challenge } from '../types.ts';
 import type { BoardRowView, BoardView } from './leaderboard.ts';
 
-/** Самые длинные серии участника — их медали идут под столбиком. */
+/**
+ * Медали под столбиком: сначала особые бейджи (торт именинника),
+ * затем самые длинные серии.
+ */
 export function topStreakBadges(codes: readonly BadgeCode[], limit = 3): BadgeCode[] {
-  return codes
+  const special = codes.filter((code) => code === 'birthday');
+  const streaks = codes
     .filter((code) => badgeMeta(code).streak !== undefined)
-    .sort((a, b) => (badgeMeta(b).streak ?? 0) - (badgeMeta(a).streak ?? 0))
-    .filter((code, index, all) => all.indexOf(code) === index)
-    .slice(0, limit);
+    .sort((a, b) => (badgeMeta(b).streak ?? 0) - (badgeMeta(a).streak ?? 0));
+  return [...new Set([...special, ...streaks])].slice(0, limit);
 }
 
 export function buildBoardView(

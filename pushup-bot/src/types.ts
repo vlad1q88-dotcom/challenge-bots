@@ -66,11 +66,13 @@ export type BadgeCode =
   | `streak_${number}`
   | 'champion'
   | 'finisher'
-  | 'loser';
+  | 'loser'
+  | 'birthday';
 
 export interface AwardedBadge {
   code: BadgeCode;
   awardedAt: string;
+  /** В каком контексте получен: id челленджа, а для именинника — ещё и год. */
   challengeId: string | null;
 }
 
@@ -79,6 +81,8 @@ export interface UserProfile {
   /** Чат с ботом, куда шлём борды и уведомления. */
   chatId: number;
   displayName: string;
+  /** День рождения как MM-DD: год не спрашиваем, он не нужен. */
+  birthday?: string;
   badges: AwardedBadge[];
 }
 

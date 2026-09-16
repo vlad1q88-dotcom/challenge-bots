@@ -71,6 +71,47 @@ export function formatDayRu(day: string): string {
   return `${date}.${month}.${year}`;
 }
 
+/** Разбирает «16.09», «16.09.1990», «16 сентября» → MM-DD. */
+export function parseBirthday(raw: string): string | null {
+  const digits = raw.trim().match(/^(\d{1,2})\s*[.,/\-\s]\s*(\d{1,2})(?:\s*[.,/\-\s]\s*\d{2,4})?$/);
+  if (digits) {
+    const date = Number(digits[1]);
+    const month = Number(digits[2]);
+    return isRealDate(month, date) ? format(month, date) : null;
+  }
+  const MONTHS = [
+    'янв', 'фев', 'мар', 'апр', 'ма', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
+  ];
+  const words = raw.trim().toLowerCase().match(/^(\d{1,2})\s+([а-яё]+)/);
+  if (words) {
+    const date = Number(words[1]);
+    const month = MONTHS.findIndex((alias) => (words[2] ?? '').startsWith(alias)) + 1;
+    if (month > 0 && isRealDate(month, date)) return format(month, date);
+  }
+  return null;
+}
+
+function isRealDate(month: number, date: number): boolean {
+  if (!Number.isInteger(month) || !Number.isInteger(date)) return false;
+  if (month < 1 || month > 12 || date < 1) return false;
+  // 2024 — високосный, поэтому 29 февраля проходит.
+  return date <= new Date(Date.UTC(2024, month, 0)).getUTCDate();
+}
+
+function format(month: number, date: number): string {
+  return `${String(month).padStart(2, '0')}-${String(date).padStart(2, '0')}`;
+}
+
+/** Совпадает ли день челленджа (YYYY-MM-DD) с днём рождения (MM-DD). */
+export function isBirthday(day: string, birthday: string | undefined): boolean {
+  return birthday !== undefined && day.slice(5) === birthday;
+}
+
+export function formatBirthdayRu(birthday: string): string {
+  const [month, date] = birthday.split('-');
+  return `${date}.${month}`;
+}
+
 export function isValidTimezone(timezone: string): boolean {
   try {
     new Intl.DateTimeFormat('en-CA', { timeZone: timezone });

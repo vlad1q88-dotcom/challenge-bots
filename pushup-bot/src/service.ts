@@ -14,7 +14,7 @@ import {
   startChallenge,
   type Result,
 } from './domain/challenge.ts';
-import { dateOfWeekday, isValidTimezone, mondayOf, todayKey } from './domain/dates.ts';
+import { dateOfWeekday, isBirthday, isValidTimezone, mondayOf, parseBirthday, todayKey } from './domain/dates.ts';
 import { bestStreak, currentStreak } from './domain/streaks.ts';
 import type { Store } from './storage/store.ts';
 import type { SyncSummary } from './domain/challenge.ts';
@@ -89,6 +89,27 @@ export class ChallengeService {
 
   user(userId: number): UserProfile | undefined {
     return this.#store.data.users.find((user) => user.userId === userId);
+  }
+
+  /** Запоминает день рождения: год не нужен, храним MM-DD. */
+  setBirthday(userId: number, raw: string): Result<string> {
+    const birthday = parseBirthday(raw);
+    if (!birthday) return fail('Не понял дату. Напиши в виде 16.09 или «16 сентября».');
+    const user = this.user(userId);
+    if (!user) return fail('Сначала напиши боту /start.');
+    user.birthday = birthday;
+    return ok(birthday);
+  }
+
+  /** Бейджи для борда: серии и торт, полученный именно в этом челлендже. */
+  badgeCodes(userId: number, challenge: Challenge): BadgeCode[] {
+    const user = this.user(userId);
+    if (!user) return [];
+    const cake = user.badges.some(
+      (badge) => badge.code === 'birthday' && (badge.challengeId ?? '').startsWith(`${challenge.id}:`),
+    );
+    const streaks = user.badges.filter((badge) => badge.code.startsWith('streak_')).map((badge) => badge.code);
+    return cake ? ['birthday', ...streaks] : streaks;
   }
 
   /** Дни, за которые человек отчитался в конкретном челлендже. */
@@ -298,7 +319,20 @@ export class ChallengeService {
     const best = bestStreak(days);
     // Серия могла закрыться задним числом, поэтому смотрим на лучшую в челлендже.
     const awarded = this.awardBadges(input.userId, streakBadgesFor(best), null);
-    return ok({ challenge, summary: synced.value, awarded, streak, best });
+
+    // Торт: в день рождения норма дня выполнена.
+    const birthday = this.user(input.userId)?.birthday;
+    const summary = synced.value;
+    const celebrated = [...summary.added, ...summary.updated, ...summary.unchanged].find(
+      (change) => isBirthday(change.day, birthday) && change.reps >= challenge.dailyGoal,
+    );
+    if (celebrated) {
+      awarded.push(
+        ...this.awardBadges(input.userId, ['birthday'], `${challenge.id}:${celebrated.day.slice(0, 4)}`),
+      );
+    }
+
+    return ok({ challenge, summary, awarded, streak, best });
   }
 
   // --- Финиш --------------------------------------------------------------

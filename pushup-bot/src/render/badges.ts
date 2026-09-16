@@ -24,6 +24,7 @@ const SPECIAL: Partial<Record<BadgeCode, BadgePalette>> = {
   champion: { ring: '#FFD25A', light: '#FFE49A', dark: '#DDA412', ink: '#2C1F02' },
   finisher: { ring: '#37D67A', light: '#7BE9AA', dark: '#1B9E56', ink: '#04240F' },
   loser: { ring: '#FF6B6B', light: '#FF9C9C', dark: '#C93B3B', ink: '#2C0808' },
+  birthday: { ring: '#FF9FD0', light: '#FFC8E4', dark: '#E0629F', ink: '#330B22' },
 };
 
 export function badgePalette(code: BadgeCode, earned = true): BadgePalette {
@@ -122,7 +123,7 @@ export function drawBadge(
   const meta = badgeMeta(code);
 
   // Итоговые бейджи — настоящие эмодзи, без нарисованной медали под ними.
-  if (code === 'champion' || code === 'finisher' || code === 'loser') {
+  if (code === 'champion' || code === 'finisher' || code === 'loser' || code === 'birthday') {
     const font = emojiFont(radius * 2.1);
     if (font) {
       context.save();

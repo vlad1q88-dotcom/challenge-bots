@@ -21,7 +21,7 @@ import { renderBoard } from '../render/leaderboard.ts';
 import { boardCaption, buildBoardView, escapeHtml } from '../render/view.ts';
 import type { ChallengeService, FinishedChallenge, WeekEntry } from '../service.ts';
 import type { SyncSummary } from '../domain/challenge.ts';
-import { weekdayOf } from '../domain/dates.ts';
+import { formatBirthdayRu, weekdayOf } from '../domain/dates.ts';
 import { inviteText } from './invite.ts';
 import type { BadgeCode, Challenge } from '../types.ts';
 import { HELP, RULES } from './texts.ts';
@@ -68,9 +68,7 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
 
   async function sendBoardTo(chatId: number, challenge: Challenge, note?: string): Promise<void> {
     const today = service.today(challenge.timezone);
-    const png = renderBoard(
-      buildBoardView(challenge, today, (id) => service.user(id)?.badges.map((badge) => badge.code) ?? []),
-    );
+    const png = renderBoard(buildBoardView(challenge, today, (id) => service.badgeCodes(id, challenge)));
     const caption = [note, boardCaption(challenge, today)].filter(Boolean).join('\n\n');
     await bot.api.sendPhoto(chatId, new InputFile(png, `board-${challenge.id}.png`), {
       caption: caption.slice(0, 1024),
@@ -553,6 +551,36 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     await service.save();
     await ctx.reply('Челлендж отменён, слот освободился.');
     await broadcastText(cancelled.value, `❌ Челлендж <b>${escapeHtml(cancelled.value.title)}</b> отменён инициатором.`, id);
+  });
+
+  bot.command(['bday', 'birthday'], async (ctx) => {
+    remember(ctx);
+    const id = userId(ctx);
+    const argument = (ctx.match ?? '').trim();
+    const user = service.user(id);
+    if (!argument) {
+      await ctx.reply(
+        (user?.birthday
+          ? `Твой день рождения: <b>${formatBirthdayRu(user.birthday)}</b>.\n\n`
+          : 'День рождения пока не указан.\n\n') +
+          'Чтобы бот выдал бейдж 🎂 «Именинник», пришли дату: <code>/bday 16.09</code>\n' +
+          'Год не нужен. Бейдж придёт, если в этот день выполнишь дневную норму.',
+        { parse_mode: 'HTML' },
+      );
+      return;
+    }
+    const saved = service.setBirthday(id, argument);
+    if (!saved.ok) {
+      await ctx.reply(saved.error);
+      return;
+    }
+    await service.save();
+    await ctx.reply(
+      `Запомнил: <b>${formatBirthdayRu(saved.value)}</b>. ` +
+        'Выполнишь норму в этот день — получишь 🎂 «Именинник».\n' +
+        'Если день рождения уже прошёл в этом челлендже, просто пришли скриншот той недели заново.',
+      { parse_mode: 'HTML' },
+    );
   });
 
   bot.command('badges', async (ctx) => {
