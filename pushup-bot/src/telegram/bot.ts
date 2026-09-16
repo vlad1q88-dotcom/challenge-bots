@@ -583,6 +583,53 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     );
   });
 
+  bot.command(['setbday', 'setbirthday'], async (ctx) => {
+    remember(ctx);
+    const id = userId(ctx);
+    const parts = (ctx.match ?? '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length < 3) {
+      const own = service.challengesOf(id).filter((challenge) => challenge.ownerId === id && challenge.status !== 'finished');
+      const example = own[0]?.id ?? 'КОД';
+      const names = own[0]?.participants.map((item) => item.nickname).join(', ');
+      await ctx.reply(
+        'Поставить участнику день рождения (он об этом не узнает — бейдж станет сюрпризом):\n' +
+          `<code>/setbday ${example} НИК 16.09</code>` +
+          (names ? `\n\nУчастники: ${escapeHtml(names)}` : ''),
+        { parse_mode: 'HTML' },
+      );
+      return;
+    }
+
+    const [code = '', nickname = '', ...rest] = parts;
+    const result = service.setBirthdayFor(id, code.toUpperCase(), nickname, rest.join(' '));
+    if (!result.ok) {
+      await ctx.reply(result.error);
+      return;
+    }
+    await service.save();
+
+    const { nickname: name, birthday, awarded, already } = result.value;
+    const outcome = already
+      ? 'Бейдж 🎂 у него уже есть.'
+      : awarded.length > 0
+        ? 'Норма в этот день уже выполнена — бейдж 🎂 только что улетел имениннику.'
+        : 'Бейдж 🎂 придёт, когда он выполнит норму в этот день. Сам он ничего не заметил.';
+    await ctx.reply(
+      `Записал: у <b>${escapeHtml(name)}</b> день рождения ${formatBirthdayRu(birthday)}.\n${outcome}`,
+      { parse_mode: 'HTML' },
+    );
+
+    if (awarded.length === 0) return;
+    const challenge = service.challenge(code.toUpperCase());
+    const chatId = challenge ? service.user(result.value.userId)?.chatId : undefined;
+    if (!challenge || chatId === undefined) return;
+    await sendBoardTo(
+      chatId,
+      challenge,
+      '🎂 <b>С днём рождения!</b>\nНорму в свой день ты выполнил — держи бейдж «Именинник».',
+    ).catch((error: unknown) => console.error('Не удалось поздравить именинника:', error));
+  });
+
   bot.command('badges', async (ctx) => {
     remember(ctx);
     const id = userId(ctx);

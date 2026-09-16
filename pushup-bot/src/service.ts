@@ -101,6 +101,53 @@ export class ChallengeService {
     return ok(birthday);
   }
 
+  /**
+   * Инициатор ставит день рождения участнику — например, чтобы бейдж стал
+   * сюрпризом. Если норма в этот день уже выполнена, торт выдаётся сразу.
+   */
+  setBirthdayFor(
+    ownerId: number,
+    code: string,
+    nickname: string,
+    raw: string,
+  ): Result<{ userId: number; nickname: string; birthday: string; awarded: BadgeCode[]; already: boolean }> {
+    const challenge = this.challenge(code);
+    if (!challenge) return fail('Челлендж с таким кодом не найден.');
+    if (challenge.ownerId !== ownerId) {
+      return fail('Ставить дату участнику может только инициатор челленджа.');
+    }
+    if (challenge.status === 'finished' || challenge.status === 'cancelled') {
+      return fail('Челлендж уже закончился.');
+    }
+    const participant = challenge.participants.find(
+      (item) => item.nickname.toLowerCase() === nickname.trim().toLowerCase(),
+    );
+    if (!participant) {
+      const names = challenge.participants.map((item) => item.nickname).join(', ');
+      return fail(`В челлендже нет участника с таким ником. Есть: ${names}.`);
+    }
+    const birthday = parseBirthday(raw);
+    if (!birthday) return fail('Не понял дату. Напиши в виде 16.09 или «16 сентября».');
+
+    const user = this.user(participant.userId);
+    if (!user) return fail('Этот участник ещё ни разу не писал боту.');
+    user.birthday = birthday;
+
+    // Если день уже отчитан и норма выполнена — торт заслужен прямо сейчас.
+    const celebrated = challenge.reports.find(
+      (report) =>
+        report.userId === participant.userId &&
+        isBirthday(report.day, birthday) &&
+        report.reps >= challenge.dailyGoal,
+    );
+    const scope = celebrated ? `${challenge.id}:${celebrated.day.slice(0, 4)}` : null;
+    const already =
+      scope !== null && user.badges.some((badge) => badge.code === 'birthday' && badge.challengeId === scope);
+    const awarded = scope !== null ? this.awardBadges(participant.userId, ['birthday'], scope) : [];
+
+    return { ok: true, value: { userId: participant.userId, nickname: participant.nickname, birthday, awarded, already } };
+  }
+
   /** Бейджи для борда: серии и торт, полученный именно в этом челлендже. */
   badgeCodes(userId: number, challenge: Challenge): BadgeCode[] {
     const user = this.user(userId);
