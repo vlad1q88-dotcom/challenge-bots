@@ -61,10 +61,10 @@ test('при вступлении бот спрашивает день рожд�
 
   await say(2, `/join ${code}`);
   await say(2, 'Максимка');
-  assert.match(lastTo(2), /когда у тебя день рождения/i);
+  assert.match(lastTo(2), /День рождения — день и месяц/);
 
   await say(2, '3 марта');
-  assert.match(lastTo(2), /Запомнил/);
+  assert.match(lastTo(2), /Записал: 03\.03/);
   assert.equal(service.user(2)?.birthday, '03-03');
   // Ник при этом уже записан: вступление не ждёт даты.
   assert.equal(service.challenge(code)?.participants.length, 2);
@@ -79,10 +79,10 @@ test('дату можно пропустить, участие остаётся'
   await say(3, `/join ${code}`);
   await say(3, 'Гоша');
   await say(3, 'потом как-нибудь');
-  assert.match(lastTo(3), /Не понял дату/);
+  assert.match(lastTo(3), /Нужен день и месяц/);
 
   await say(3, '/skip');
-  assert.match(lastTo(3), /Ок, без даты/);
+  assert.match(lastTo(3), /Пропущено/);
   assert.equal(service.user(3)?.birthday, undefined);
   assert.equal(service.challenge(code)?.participants.some((item) => item.nickname === 'Гоша'), true);
 });

@@ -224,21 +224,16 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     }
   }
 
-  /**
-   * Последний шаг вступления: спрашиваем день рождения, если бот его не знает.
-   * Отвечать необязательно — дату можно добавить позже командой /bday.
-   */
-  async function askBirthday(ctx: Context): Promise<void> {
-    const id = userId(ctx);
-    if (service.user(id)?.birthday) return;
+  /** Спрашивает день рождения, если бот его ещё не знает. */
+  function birthdayPrompt(id: number): string | null {
+    if (service.user(id)?.birthday) return null;
     sessions.set(id, { kind: 'birthday' });
-    await ctx.reply(
-      'И последнее: когда у тебя день рождения?\n' +
-        'Напиши день и месяц — <code>16.09</code>. Год не нужен.\n' +
-        'Выполнишь норму в этот день — получишь бейдж 🎂 «Именинник».\n\n' +
-        'Не хочешь указывать — отправь /skip.',
-      { parse_mode: 'HTML' },
-    );
+    return 'День рождения — день и месяц, например 16.09. Пропустить: /skip';
+  }
+
+  async function askBirthday(ctx: Context): Promise<void> {
+    const prompt = birthdayPrompt(userId(ctx));
+    if (prompt) await ctx.reply(prompt);
   }
 
   const WEEKDAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -408,11 +403,7 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     const id = userId(ctx);
     const skipped = sessions.get(id)?.kind === 'birthday';
     sessions.delete(id);
-    await ctx.reply(
-      skipped
-        ? 'Ок, без даты. Захочешь бейдж 🎂 — пришли её командой /bday 16.09.'
-        : 'Пропускать нечего. Список команд: /help',
-    );
+    await ctx.reply(skipped ? 'Пропущено. Позже — /bday 16.09' : 'Пропускать нечего. Список команд: /help');
   });
 
   bot.command('cancel', async (ctx) => {
@@ -661,10 +652,7 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     }
     await service.save();
     await ctx.reply(
-      `Запомнил: <b>${formatBirthdayRu(saved.value)}</b>. ` +
-        'Выполнишь норму в этот день — получишь 🎂 «Именинник».\n' +
-        'Если день рождения уже прошёл в этом челлендже, просто пришли скриншот той недели заново.',
-      { parse_mode: 'HTML' },
+      `Записал: ${formatBirthdayRu(saved.value)}. Если день уже прошёл в челлендже — пришли скриншот той недели заново.`,
     );
   });
 
@@ -908,15 +896,12 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     if (session.kind === 'birthday') {
       const saved = service.setBirthday(id, text);
       if (!saved.ok) {
-        await ctx.reply(`${saved.error}\nИли отправь /skip, чтобы пропустить.`);
+        await ctx.reply('Нужен день и месяц, например 16.09. Пропустить: /skip');
         return;
       }
       sessions.delete(id);
       await service.save();
-      await ctx.reply(
-        `Запомнил: <b>${formatBirthdayRu(saved.value)}</b>. Поздравим 🎂`,
-        { parse_mode: 'HTML' },
-      );
+      await ctx.reply(`Записал: ${formatBirthdayRu(saved.value)}`);
       return;
     }
 
@@ -949,12 +934,12 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       }
       sessions.delete(id);
       await service.save();
+      const prompt = birthdayPrompt(id);
       await ctx.reply(
-        `Вызов принят, ты в игре под ником <b>${escapeHtml(check.nickname)}</b>.\n` +
-          `Ждём старта от инициатора. Лидер-борд: /board ${challenge.id}`,
+        `Вызов принят, ты в игре под ником <b>${escapeHtml(check.nickname)}</b>.` +
+          (prompt ? `\n${prompt}` : `\nЖдём старта от инициатора. Лидер-борд: /board ${challenge.id}`),
         { parse_mode: 'HTML' },
       );
-      await askBirthday(ctx);
       await broadcastText(
         challenge,
         `➕ <b>${escapeHtml(check.nickname)}</b> принял вызов «${escapeHtml(challenge.title)}» ` +
