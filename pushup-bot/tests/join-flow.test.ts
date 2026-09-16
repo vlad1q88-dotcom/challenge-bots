@@ -53,7 +53,7 @@ async function createChallenge(say: (userId: number, text: string) => Promise<vo
   await say(1, 'Vlad');
 }
 
-test('при вступлении бот спрашивает день рождения после ника', async () => {
+test('дата рождения — обязательный шаг: вызов принят только после неё', async () => {
   const { service, say, lastTo } = await harness();
   await createChallenge(say);
   await say(1, '16.09');
@@ -61,43 +61,63 @@ test('при вступлении бот спрашивает день рожд�
 
   await say(2, `/join ${code}`);
   await say(2, 'Максимка');
-  assert.match(lastTo(2), /День рождения — день и месяц/);
+  assert.match(lastTo(2), /день рождения/i);
+  // Участника ещё нет: сначала дата.
+  assert.equal(service.challenge(code)?.participants.length, 1);
 
   await say(2, '3 марта');
-  assert.match(lastTo(2), /Записал: 03\.03/);
+  assert.match(lastTo(2), /Вызов принят/);
   assert.equal(service.user(2)?.birthday, '03-03');
-  // Ник при этом уже записан: вступление не ждёт даты.
   assert.equal(service.challenge(code)?.participants.length, 2);
 });
 
-test('дату можно пропустить, участие остаётся', async () => {
+test('непонятная дата переспрашивается, вступление ждёт', async () => {
   const { service, say, lastTo } = await harness();
   await createChallenge(say);
-  await say(1, '/skip');
+  await say(1, '16.09');
   const code = service.challengesOf(1)[0]!.id;
 
   await say(3, `/join ${code}`);
   await say(3, 'Гоша');
   await say(3, 'потом как-нибудь');
   assert.match(lastTo(3), /Нужен день и месяц/);
+  assert.equal(service.challenge(code)?.participants.length, 1);
 
-  await say(3, '/skip');
-  assert.match(lastTo(3), /Пропущено/);
-  assert.equal(service.user(3)?.birthday, undefined);
+  await say(3, '01.12');
+  assert.match(lastTo(3), /Вызов принят/);
   assert.equal(service.challenge(code)?.participants.some((item) => item.nickname === 'Гоша'), true);
 });
 
-test('у кого дата уже есть, того не переспрашивают', async () => {
+test('у кого дата уже есть, тот вступает сразу после ника', async () => {
   const { service, say, sent } = await harness();
   await createChallenge(say);
   await say(1, '16.09');
+  const code = service.challengesOf(1)[0]!.id;
+
+  // Второй участник указал дату в первом челлендже.
+  await say(2, `/join ${code}`);
+  await say(2, 'Максимка');
+  await say(2, '03.03');
 
   sent.length = 0;
-  await say(1, '/new');
-  await say(1, 'Второй');
-  await say(1, '10');
-  await say(1, '30');
-  await say(1, 'Vlad2');
+  await say(2, '/new');
+  await say(2, 'Второй');
+  await say(2, '10');
+  await say(2, '30');
+  await say(2, 'Макс2');
+  // Дату не переспрашивают, челлендж создаётся сразу после ника.
   assert.equal(sent.some((item) => /день рождения/i.test(item.text)), false);
+  assert.equal(service.challengesOf(2).length, 2);
+});
+
+test('создание челленджа тоже требует дату', async () => {
+  const { service, say, lastTo } = await harness();
+  await createChallenge(say);
+  assert.match(lastTo(1), /день рождения/i);
+  // Челлендж ещё не создан.
+  assert.equal(service.challengesOf(1).length, 0);
+
+  await say(1, '16.09');
+  assert.equal(service.challengesOf(1).length, 1);
   assert.equal(service.user(1)?.birthday, '09-16');
 });

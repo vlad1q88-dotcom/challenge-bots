@@ -28,10 +28,16 @@ import type { BadgeCode, Challenge } from '../types.ts';
 import { HELP, RULES } from './texts.ts';
 
 type Session =
-  | { kind: 'new'; step: 'title' | 'days' | 'goal' | 'nick'; title?: string; days?: number; goal?: number }
-  | { kind: 'join'; step: 'code' | 'nick'; code?: string }
-  | { kind: 'nick'; code: string }
-  | { kind: 'birthday' };
+  | {
+      kind: 'new';
+      step: 'title' | 'days' | 'goal' | 'nick' | 'birthday';
+      title?: string;
+      days?: number;
+      goal?: number;
+      nickname?: string;
+    }
+  | { kind: 'join'; step: 'code' | 'nick' | 'birthday'; code?: string; nickname?: string }
+  | { kind: 'nick'; code: string };
 
 /** Распознанная неделя, которая ждёт выбора челленджа. */
 interface PendingReport {
@@ -224,16 +230,12 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
     }
   }
 
-  /** Спрашивает день рождения, если бот его ещё не знает. */
-  function birthdayPrompt(id: number): string | null {
-    if (service.user(id)?.birthday) return null;
-    sessions.set(id, { kind: 'birthday' });
-    return 'День рождения — день и месяц, например 16.09. Пропустить: /skip';
-  }
+  const BIRTHDAY_PROMPT =
+    'Теперь укажи день рождения — день и месяц, например <code>16.09</code>. Прервать: /cancel';
 
-  async function askBirthday(ctx: Context): Promise<void> {
-    const prompt = birthdayPrompt(userId(ctx));
-    if (prompt) await ctx.reply(prompt);
+  /** Дата нужна один раз: у кого она уже есть, того не спрашиваем. */
+  function needsBirthday(id: number): boolean {
+    return !service.user(id)?.birthday;
   }
 
   const WEEKDAY_NAMES = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -397,13 +399,6 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
   bot.command('rules', async (ctx) => {
     remember(ctx);
     await ctx.reply(RULES, { parse_mode: 'HTML' });
-  });
-
-  bot.command('skip', async (ctx) => {
-    const id = userId(ctx);
-    const skipped = sessions.get(id)?.kind === 'birthday';
-    sessions.delete(id);
-    await ctx.reply(skipped ? 'Пропущено. Позже — /bday 16.09' : 'Пропускать нечего. Список команд: /help');
   });
 
   bot.command('cancel', async (ctx) => {
@@ -893,18 +888,6 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       return;
     }
 
-    if (session.kind === 'birthday') {
-      const saved = service.setBirthday(id, text);
-      if (!saved.ok) {
-        await ctx.reply('Нужен день и месяц, например 16.09. Пропустить: /skip');
-        return;
-      }
-      sessions.delete(id);
-      await service.save();
-      await ctx.reply(`Записал: ${formatBirthdayRu(saved.value)}`);
-      return;
-    }
-
     if (session.kind === 'nick') {
       await applyNickname(ctx, session.code, text);
       return;
@@ -921,32 +904,28 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
         await ctx.reply('Челлендж не найден, начни заново: /join КОД');
         return;
       }
-      const check = checkNickname(text, challenge.participants.map((participant) => participant.nickname));
-      if (!check.ok) {
-        await ctx.reply(check.error);
+
+      if (session.step === 'nick') {
+        const check = checkNickname(text, challenge.participants.map((participant) => participant.nickname));
+        if (!check.ok) {
+          await ctx.reply(check.error);
+          return;
+        }
+        if (needsBirthday(id)) {
+          sessions.set(id, { kind: 'join', step: 'birthday', code: challenge.id, nickname: check.nickname });
+          await ctx.reply(BIRTHDAY_PROMPT, { parse_mode: 'HTML' });
+          return;
+        }
+        await finishJoin(ctx, challenge, check.nickname);
         return;
       }
-      const joined = service.join(challenge.id, id, check.nickname);
-      if (!joined.ok) {
-        sessions.delete(id);
-        await ctx.reply(joined.error);
+
+      const saved = service.setBirthday(id, text);
+      if (!saved.ok) {
+        await ctx.reply('Нужен день и месяц, например 16.09.');
         return;
       }
-      sessions.delete(id);
-      await service.save();
-      const prompt = birthdayPrompt(id);
-      await ctx.reply(
-        `Вызов принят, ты в игре под ником <b>${escapeHtml(check.nickname)}</b>.` +
-          (prompt ? `\n${prompt}` : `\nЖдём старта от инициатора. Лидер-борд: /board ${challenge.id}`),
-        { parse_mode: 'HTML' },
-      );
-      await broadcastText(
-        challenge,
-        `➕ <b>${escapeHtml(check.nickname)}</b> принял вызов «${escapeHtml(challenge.title)}» ` +
-          `(${challenge.participants.length}/${MAX_PARTICIPANTS}).` +
-          (challenge.ownerId === id ? '' : `\nЗапустить челлендж: /begin ${challenge.id}`),
-        id,
-      );
+      await finishJoin(ctx, challenge, session.nickname ?? '');
       return;
     }
 
@@ -985,17 +964,67 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       return;
     }
 
-    const check = checkNickname(text);
-    if (!check.ok) {
-      await ctx.reply(check.error);
+    if (session.step === 'nick') {
+      const nick = checkNickname(text);
+      if (!nick.ok) {
+        await ctx.reply(nick.error);
+        return;
+      }
+      if (needsBirthday(id)) {
+        sessions.set(id, { ...session, step: 'birthday', nickname: nick.nickname });
+        await ctx.reply(BIRTHDAY_PROMPT, { parse_mode: 'HTML' });
+        return;
+      }
+      await finishCreate(ctx, session, nick.nickname);
       return;
     }
+
+    const saved = service.setBirthday(id, text);
+    if (!saved.ok) {
+      await ctx.reply('Нужен день и месяц, например 16.09.');
+      return;
+    }
+    await finishCreate(ctx, session, session.nickname ?? '');
+  });
+
+  /** Завершает вступление: записывает участника и оповещает остальных. */
+  async function finishJoin(ctx: Context, challenge: Challenge, nickname: string): Promise<void> {
+    const id = userId(ctx);
+    const joined = service.join(challenge.id, id, nickname);
+    if (!joined.ok) {
+      sessions.delete(id);
+      await ctx.reply(joined.error);
+      return;
+    }
+    sessions.delete(id);
+    await service.save();
+    await ctx.reply(
+      `Вызов принят, ты в игре под ником <b>${escapeHtml(nickname)}</b>.\n` +
+        `Ждём старта от инициатора. Лидер-борд: /board ${challenge.id}`,
+      { parse_mode: 'HTML' },
+    );
+    await broadcastText(
+      challenge,
+      `➕ <b>${escapeHtml(nickname)}</b> принял вызов «${escapeHtml(challenge.title)}» ` +
+        `(${challenge.participants.length}/${MAX_PARTICIPANTS}).` +
+        (challenge.ownerId === id ? '' : `\nЗапустить челлендж: /begin ${challenge.id}`),
+      id,
+    );
+  }
+
+  /** Завершает создание челленджа и присылает приглашение. */
+  async function finishCreate(
+    ctx: Context,
+    session: { title?: string; days?: number; goal?: number },
+    nickname: string,
+  ): Promise<void> {
+    const id = userId(ctx);
     const created = service.create({
       ownerId: id,
       title: session.title ?? 'Челлендж по отжиманиям',
       days: session.days ?? 30,
       dailyGoal: session.goal ?? 50,
-      nickname: check.nickname,
+      nickname,
     });
     if (!created.ok) {
       sessions.delete(id);
@@ -1016,8 +1045,7 @@ export function wire(bot: Bot, service: ChallengeService, options: WireOptions =
       { parse_mode: 'HTML' },
     );
     await sendInvite(ctx, challenge);
-    await askBirthday(ctx);
-  });
+  }
 
   bot.catch((error) => {
     console.error('Ошибка обработчика:', error);

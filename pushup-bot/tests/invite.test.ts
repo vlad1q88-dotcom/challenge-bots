@@ -23,7 +23,7 @@ test('текст вызова содержит условия и ссылку-п
   assert.match(text, /30 дней подряд/);
   assert.match(text, /1800 отжиманий/);
   assert.match(text, /Участников: 2 из 6 \(свободно 4\)/);
-  assert.match(text, /Один скриншот в день/);
+  assert.match(text, /повторная отправка ничего не удваивает/);
   assert.match(text, /https:\/\/t\.me\/pushup_bot\?start=join_K7QM3P/);
   assert.match(text, /\/join K7QM3P/);
   // Пересылается как обычный текст: разметка не нужна.
